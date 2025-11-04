@@ -1,8 +1,9 @@
+playwright==1.41.2
+greenlet==3.0.1
 aiogram==3.4.1
 SQLAlchemy==2.0.25
 python-dotenv
 cryptography
 aiohttp
 requests
-playwright==1.47.0
 bip-utils
