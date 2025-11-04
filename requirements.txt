@@ -1,23 +1,12 @@
-# Telegram bot framework
 aiogram==3.4.1
-
-# Compatible async and HTTP libraries
 aiohttp==3.9.1
 yarl==1.9.4
 frozenlist==1.4.1
 multidict==6.0.4
-
-# ORM and env utils
 SQLAlchemy==2.0.25
 python-dotenv==1.0.1
-
-# Security and cryptography
 cryptography==41.0.7
-
-# Requests & utils
 requests==2.32.3
 bip-utils==2.10.0
-
-# Browser automation
 playwright==1.41.2
 greenlet==3.0.3
