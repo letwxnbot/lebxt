@@ -1,9 +1,6 @@
-pip>=23.3
-setuptools>=68.0
-wheel
-
+# Core bot dependencies
 aiogram==3.4.1
-aiohttp==3.9.5
+aiohttp==3.10.10  
 SQLAlchemy==2.0.25
 python-dotenv
 cryptography
