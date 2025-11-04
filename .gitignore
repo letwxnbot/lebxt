@@ -1,0 +1,26 @@
+# Environment and virtual environment
+.env
+venv/
+
+# Python cache and logs
+__pycache__/
+*.pyc
+*.log
+
+# Database files
+*.db
+*.sqlite
+.env
+venv/
+venv/
+.env
+__pycache__/
+*.pyc
+*.log
+venv/
+.env
+__pycache__/
+*.pyc
+*.log
+*.db
+*.sqlite

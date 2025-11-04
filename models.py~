@@ -1,0 +1,53 @@
+# models.py
+from sqlalchemy import Column, Integer, BigInteger, String, Numeric, Text, DateTime, ForeignKey
+from sqlalchemy.orm import declarative_base
+from datetime import datetime
+
+Base = declarative_base()
+
+# --- User table ---
+class User(Base):
+    __tablename__ = "users"
+    id = Column(BigInteger, primary_key=True)
+    username = Column(String)
+    display_name = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+# --- Wallet table ---
+class Wallet(Base):
+    __tablename__ = "wallets"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, index=True)
+    coin = Column(String)
+    balance = Column(Numeric, default=0)
+    deposit_address = Column(String, nullable=True)
+    address_index = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+# --- Card table ---
+class Card(Base):
+    __tablename__ = "cards"
+    id = Column(Integer, primary_key=True)
+    site = Column(String, index=True)
+    bin = Column(String, index=True)
+    cc_number = Column(String)
+    exp = Column(String)
+    encrypted_code = Column(Text, nullable=False)
+    balance = Column(Numeric, default=0)
+    price = Column(Numeric, default=0)
+    currency = Column(String, default="USD")
+    status = Column(String, default="in_stock")  # in_stock, sold
+    added_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+# --- Orders table ---
+class Order(Base):
+    __tablename__ = "orders"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger)
+    card_id = Column(Integer)
+    price_usd = Column(Numeric)
+    coin_used = Column(String)
+    coin_amount = Column(Numeric)
+    status = Column(String, default="completed")
+    created_at = Column(DateTime, default=datetime.utcnow)
