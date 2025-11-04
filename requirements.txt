@@ -3,12 +3,11 @@ setuptools>=68.0
 wheel
 
 aiogram==3.4.1
+aiohttp==3.9.5
 SQLAlchemy==2.0.25
 python-dotenv
 cryptography
-aiohttp
 requests
 bip-utils
 
-# Use a prebuilt wheel instead of compiling Rust code
 playwright==1.42.0 --only-binary=:all:
