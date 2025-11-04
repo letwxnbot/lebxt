@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: twxnbot
+    env: python
+    buildCommand: |
+      pip install -r requirements.txt
+      python -m playwright install chromium
+    startCommand: python bot1.py
+    plan: free
+    autoDeploy: true
