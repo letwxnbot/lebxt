@@ -5,6 +5,8 @@
 import os
 import math
 import asyncio
+import shutil
+import datetime
 from decimal import Decimal, ROUND_UP
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -39,20 +41,64 @@ def compute_rate_for_card(card):
     return Decimal("1.0")  # just sell at full balance value for now
 # =========================
 # Database setup (must be BEFORE any asyncio tasks)
-# =========================
-from models import Base
+import os
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+Base = declarative_base()
+
+# use /opt/render/project/src/data/market.db on Render, ./data locally
+base_dir = os.path.dirname(os.path.abspath(__file__))
+data_dir = os.path.join(base_dir, "data")
+os.makedirs(data_dir, exist_ok=True)
+
+db_path = os.path.join(data_dir, "market.db")
+print(f"📦 Using SQLite DB at: {db_path}")
 
 engine = create_engine(
-    "sqlite:///data/market.db",
+    f"sqlite:///{db_path}",
     connect_args={"check_same_thread": False},
     echo=False,
     future=True
 )
+
 SessionLocal = sessionmaker(bind=engine, autoflush=False, future=True)
 Base.metadata.create_all(bind=engine)
 
+# =========================
+# Daily Database Backup
+# =========================
+async def daily_db_backup(db_path: str, keep_days: int = 7):
+    """Backs up SQLite DB once per 24h and prunes old backups."""
+    backup_dir = os.path.join(os.path.dirname(db_path), "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+
+    while True:
+        try:
+            now = datetime.datetime.now()
+            backup_name = f"market_{now.strftime('%Y-%m-%d_%H-%M')}.db"
+            backup_path = os.path.join(backup_dir, backup_name)
+
+            shutil.copy2(db_path, backup_path)
+            print(f"💾 Database backup saved: {backup_path}")
+
+            # Remove old backups (older than keep_days)
+            cutoff = now - datetime.timedelta(days=keep_days)
+            for f in os.listdir(backup_dir):
+                full_path = os.path.join(backup_dir, f)
+                try:
+                    if os.path.isfile(full_path):
+                        ts = datetime.datetime.strptime(f.split("_")[1], "%Y-%m-%d")
+                        if ts < cutoff:
+                            os.remove(full_path)
+                            print(f"🧹 Removed old backup: {f}")
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"⚠️ Backup error: {e}")
+
+        # wait 24 hours (86400 seconds)
+        await asyncio.sleep(86400)
 
 # =========================
 # Start bot + background tasks
