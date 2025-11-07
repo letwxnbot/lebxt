@@ -9,4 +9,3 @@ pydantic-core==2.41.5 --only-binary :all:
 bip-utils==2.9.3
 playwright==1.48.0
 asyncio==3.4.3
-decimal
