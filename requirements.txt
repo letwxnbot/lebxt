@@ -1,11 +1,10 @@
 aiogram==3.13.1
-aiohttp==3.13.2 --only-binary :all:
+aiohttp==3.9.3
 SQLAlchemy==2.0.35
 python-dotenv==1.0.1
-cryptography==43.0.1 --only-binary :all:
+cryptography==42.0.8
 requests==2.32.3
-pydantic==2.9.2 --only-binary :all:
-pydantic-core==2.41.5 --only-binary :all:
+pydantic==2.6.4
+pydantic-core==2.16.3
 bip-utils==2.9.3
 playwright==1.48.0
-asyncio==3.4.3
