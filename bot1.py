@@ -463,13 +463,12 @@ async def on_start(msg: types.Message):
 
         # user buttons
         kb_buttons = [
-            [InlineKeyboardButton(text="🛒 Browse Cards", callback_data="shop:page:1")],
-            [InlineKeyboardButton(text="💼 Wallet", callback_data="home:wallet")],
-            [InlineKeyboardButton(text="🎁 Referrals", callback_data="referrals")],
-            [InlineKeyboardButton(text="🧾 Orders", callback_data="orders")],
-            [InlineKeyboardButton(text="🆘 Support", callback_data="support:start")]
-        ]
-
+            [InlineKeyboardButton(text="🛒 View Listings", callback_data="home:shop"),
+         InlineKeyboardButton(text="🏦 Make a Deposit", callback_data="home:wallet")],
+        [InlineKeyboardButton(text="📦 Purchase History", callback_data="home:orders")],
+        [InlineKeyboardButton(text="👥 Referrals", callback_data="home:referrals"),
+         InlineKeyboardButton(text="🆘 Support Ticket", callback_data="support:new")],
+    ]
         # add admin panel
         if is_admin:
             kb_buttons.append([InlineKeyboardButton(text="⚙️ Admin Panel", callback_data="admin:home")])
