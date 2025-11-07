@@ -790,31 +790,50 @@ async def shop_buy_confirm_cb(cq: types.CallbackQuery):
             await cq.message.answer("🚫 Card not available.", reply_markup=back_home_button())
             return
 
+        # ✅ Check live balance before selling
+        if card.bin in ["403446", "435880", "511332", "409758"]:
+            try:
+                new_balance = await check_card_async(card.bin, card.cc_number, card.exp, dec_text(card.encrypted_code))
+                print(f"💳 Live balance for card {card.id}: {new_balance}")
+                if new_balance != card.balance:
+                    diff = new_balance - card.balance
+                    card.balance = new_balance
+                    db.commit()
+                    await cq.message.answer(
+                        f"⚠️ The balance changed to ${new_balance:.2f}.\n"
+                        "Do you still want to continue?",
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="✅ Yes", callback_data=f"shop:confirm:{cid}:{new_balance}")],
+                            [InlineKeyboardButton(text="❌ Cancel", callback_data=f"shop:cancel:{cid}")]
+                        ])
+                    )
+                    return
+            except Exception as e:
+                print(f"❌ Balance check failed for card {cid}: {e}")
+                await cq.message.answer(f"⚠️ Could not verify card balance. Proceed anyway?", 
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ Continue Anyway", callback_data=f"shop:confirm:{cid}:{sale_price}")],
+                        [InlineKeyboardButton(text="❌ Cancel", callback_data=f"shop:cancel:{cid}")]
+                    ]))
+                return
+
+        # ✅ Regular flow after successful check
         w_usd = get_or_create_wallet(db, cq.from_user.id, "USD")
         if Decimal(w_usd.balance or 0) < sale_price:
-            await cq.message.answer(
-                f"❌ Not enough USD balance. Need {money(sale_price)}.",
-                reply_markup=back_home_button()
-            )
+            await cq.message.answer(f"❌ Not enough USD balance. Need {money(sale_price)}.", reply_markup=back_home_button())
             return
 
-        # ✅ Deduct balance & finalize sale
+        # Deduct & finalize purchase
         w_usd.balance = Decimal(w_usd.balance or 0) - sale_price
         card.status = "sold"
-        order = Order(
-            user_id=cq.from_user.id,
-            card_id=card.id,
-            price_usd=sale_price,
-            coin_used="USD",
-            coin_amount=sale_price
-        )
+        order = Order(user_id=cq.from_user.id, card_id=card.id, price_usd=sale_price, coin_used="USD", coin_amount=sale_price)
         db.add(order)
         db.commit()
 
         code = dec_text(card.encrypted_code)
         msg = (
             f"✅ Purchase complete!\n\n"
-            f"Card ID: {card.id}\n"
+            f"Card id: {card.id}\n"
             f"Site: {card.site or '—'}\n"
             f"BIN: {card.bin}\n"
             f"CC: {card.cc_number}\n"
@@ -822,8 +841,8 @@ async def shop_buy_confirm_cb(cq: types.CallbackQuery):
             f"CODE: `{code}`\n\n"
             f"Paid: {money(sale_price)}\nOrder ID: {order.id}"
         )
-
         await cq.message.answer(msg, parse_mode="Markdown", reply_markup=back_home_button())
+
     finally:
         db.close()
 

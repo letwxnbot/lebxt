@@ -398,7 +398,7 @@ async def on_start(msg: types.Message):
 
     db = SessionLocal()
     try:
-        # make sure user exists
+        # ensure user exists
         u = db.get(User, msg.from_user.id)
         if not u:
             u = User(
@@ -409,15 +409,18 @@ async def on_start(msg: types.Message):
             db.add(u)
             db.commit()
 
-        # stats
+        # get wallet + stats
+        w_usd = get_or_create_wallet(db, msg.from_user.id, "USD")
+        usd_balance = Decimal(w_usd.balance or 0)
         purchased = db.query(Order).filter(Order.user_id == msg.from_user.id).count()
-        usd_wallet = get_or_create_wallet(db, msg.from_user.id, "USD")
-        usd_balance = Decimal(usd_wallet.balance or 0)
         stock_count = db.query(Card).filter(Card.status == "in_stock").count()
+
+        # check admin
+        is_admin = msg.from_user.id in ADMIN_IDS
 
         # main text
         text = (
-            "💳 *Welcome to Twxn's Prepaid Market, Twxn!*\n\n"
+            "💳 *Welcome to Twxn’s Prepaid Market!*\n\n"
             "💰 *Account Info:*\n"
             f"• Account Balance: *{money(usd_balance)}*\n"
             f"• Purchased cards: *{purchased}*\n"
@@ -428,15 +431,20 @@ async def on_start(msg: types.Message):
             "Open a *Support Ticket* below or reach out at @letwxn"
         )
 
-        # buttons
-        kb = InlineKeyboardMarkup(inline_keyboard=[
+        # user buttons
+        kb_buttons = [
             [InlineKeyboardButton(text="🛒 Browse Cards", callback_data="shop:page:1")],
             [InlineKeyboardButton(text="💼 Wallet", callback_data="home:wallet")],
             [InlineKeyboardButton(text="🎁 Referrals", callback_data="referrals")],
             [InlineKeyboardButton(text="🧾 Orders", callback_data="orders")],
             [InlineKeyboardButton(text="🆘 Support", callback_data="support:start")]
-        ])
+        ]
 
+        # add admin panel
+        if is_admin:
+            kb_buttons.append([InlineKeyboardButton(text="⚙️ Admin Panel", callback_data="admin:home")])
+
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
         await msg.answer(text, parse_mode="Markdown", reply_markup=kb)
     finally:
         db.close()
