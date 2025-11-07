@@ -1,10 +1,10 @@
 aiogram==3.13.1
-aiohttp==3.9.3
+aiohttp==3.10.5
 SQLAlchemy==2.0.35
 python-dotenv==1.0.1
 cryptography==42.0.8
 requests==2.32.3
-pydantic==2.6.4
-pydantic-core==2.16.3
+pydantic==2.8.2
+pydantic-core==2.20.1
 bip-utils==2.9.3
 playwright==1.48.0
