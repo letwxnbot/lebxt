@@ -39,27 +39,6 @@ def compute_rate_for_card(card):
     You can expand this later to give discounts or fees.
     """
     return Decimal("1.0")  # just sell at full balance value for now
-# =========================
-# Database setup (must be BEFORE any asyncio tasks)
-# =========================
-from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy import create_engine
-import os
-
-Base = declarative_base()
-
-# ✅ Use /tmp for Render (writable directory)
-DB_PATH = os.path.join("/tmp", "market.db")
-
-engine = create_engine(
-    f"sqlite:///{DB_PATH}",
-    connect_args={"check_same_thread": False},
-    echo=False,
-    future=True
-)
-
-SessionLocal = sessionmaker(bind=engine, autoflush=False, future=True)
-Base.metadata.create_all(bind=engine)
 
 # =========================
 # Daily Database Backup
@@ -273,24 +252,33 @@ print(f"[env] BOT_TOKEN (env): {os.getenv('BOT_TOKEN')!r}")
 BOT_TOKEN = os.getenv("BOT_TOKEN") or ""             # REQUIRED
 FERNET_KEY = os.getenv("FERNET_KEY") or ""           # REQUIRED (Fernet base64 key)
 
-# --- DATABASE PATH FIX FOR LOCAL MAC SETUP ---
+# =========================
+# Database setup (PostgreSQL for Render)
+# =========================
+from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy import create_engine
+import os
 
-# Store the database in a local "data" folder next to the script
-base_dir = os.path.dirname(os.path.abspath(__file__))
-db_dir = os.path.join(base_dir, "data")
-os.makedirs(db_dir, exist_ok=True)
-db_path = os.path.join(db_dir, "market.db")
+Base = declarative_base()
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set! Check Render environment variables.")
+
+# Ensure it uses async-safe params
 engine = create_engine(
-    "sqlite:////Users/Twxn/Desktop/twxn/data/market.db",
-    connect_args={"check_same_thread": False},
+    DATABASE_URL,
+    connect_args={},
+    pool_pre_ping=True,
     echo=False,
     future=True
 )
 
+SessionLocal = sessionmaker(bind=engine, autoflush=False, future=True)
+Base.metadata.create_all(bind=engine)
 
-print(f"✅ Using database at: {db_path}")
+print("✅ Connected to PostgreSQL successfully.")
 
 # Admin & stock
 ADMIN_IDS        = set(int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip())

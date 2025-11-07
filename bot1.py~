@@ -39,32 +39,41 @@ def compute_rate_for_card(card):
     You can expand this later to give discounts or fees.
     """
     return Decimal("1.0")  # just sell at full balance value for now
+
 # =========================
-# Database setup (must be BEFORE any asyncio tasks)
-import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+# Daily Database Backup
+# =========================
+async def daily_db_backup(db_path: str, keep_days: int = 7):
+    """Backs up SQLite DB once per 24h and prunes old backups."""
+    backup_dir = os.path.join(os.path.dirname(db_path), "backups")
+    os.makedirs(backup_dir, exist_ok=True)
 
-Base = declarative_base()
+    while True:
+        try:
+            now = datetime.datetime.now()
+            backup_name = f"market_{now.strftime('%Y-%m-%d_%H-%M')}.db"
+            backup_path = os.path.join(backup_dir, backup_name)
 
-# use /opt/render/project/src/data/market.db on Render, ./data locally
-base_dir = os.path.dirname(os.path.abspath(__file__))
-data_dir = os.path.join(base_dir, "data")
-os.makedirs(data_dir, exist_ok=True)
+            shutil.copy2(db_path, backup_path)
+            print(f"💾 Database backup saved: {backup_path}")
 
-db_path = os.path.join(data_dir, "market.db")
-print(f"📦 Using SQLite DB at: {db_path}")
+            # Remove old backups (older than keep_days)
+            cutoff = now - datetime.timedelta(days=keep_days)
+            for f in os.listdir(backup_dir):
+                full_path = os.path.join(backup_dir, f)
+                try:
+                    if os.path.isfile(full_path):
+                        ts = datetime.datetime.strptime(f.split("_")[1], "%Y-%m-%d")
+                        if ts < cutoff:
+                            os.remove(full_path)
+                            print(f"🧹 Removed old backup: {f}")
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"⚠️ Backup error: {e}")
 
-engine = create_engine(
-    f"sqlite:///{db_path}",
-    connect_args={"check_same_thread": False},
-    echo=False,
-    future=True
-)
-
-SessionLocal = sessionmaker(bind=engine, autoflush=False, future=True)
-Base.metadata.create_all(bind=engine)
-
+        # wait 24 hours (86400 seconds)
+        await asyncio.sleep(86400)
 
 # =========================
 # Start bot + background tasks
@@ -243,24 +252,32 @@ print(f"[env] BOT_TOKEN (env): {os.getenv('BOT_TOKEN')!r}")
 BOT_TOKEN = os.getenv("BOT_TOKEN") or ""             # REQUIRED
 FERNET_KEY = os.getenv("FERNET_KEY") or ""           # REQUIRED (Fernet base64 key)
 
-# --- DATABASE PATH FIX FOR LOCAL MAC SETUP ---
+# =========================
+# Database setup (must be BEFORE any asyncio tasks)
+# =========================
+from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy import create_engine
+import os
+import pathlib
 
-# Store the database in a local "data" folder next to the script
-base_dir = os.path.dirname(os.path.abspath(__file__))
-db_dir = os.path.join(base_dir, "data")
-os.makedirs(db_dir, exist_ok=True)
-db_path = os.path.join(db_dir, "market.db")
+Base = declarative_base()
+
+# ✅ Use writable directory on Render
+DB_DIR = "/tmp"
+os.makedirs(DB_DIR, exist_ok=True)
+DB_PATH = os.path.join(DB_DIR, "market.db")
+
+print(f"📁 Using SQLite at: {DB_PATH}")
 
 engine = create_engine(
-    "sqlite:////Users/Twxn/Desktop/twxn/data/market.db",
+    f"sqlite:///{DB_PATH}",
     connect_args={"check_same_thread": False},
     echo=False,
     future=True
 )
 
-
-print(f"✅ Using database at: {db_path}")
+SessionLocal = sessionmaker(bind=engine, autoflush=False, future=True)
+Base.metadata.create_all(bind=engine)
 
 # Admin & stock
 ADMIN_IDS        = set(int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip())
