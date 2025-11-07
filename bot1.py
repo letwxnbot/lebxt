@@ -41,22 +41,18 @@ def compute_rate_for_card(card):
     return Decimal("1.0")  # just sell at full balance value for now
 # =========================
 # Database setup (must be BEFORE any asyncio tasks)
-import os
+# =========================
+from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+import os
 
 Base = declarative_base()
 
-# use /opt/render/project/src/data/market.db on Render, ./data locally
-base_dir = os.path.dirname(os.path.abspath(__file__))
-data_dir = os.path.join(base_dir, "data")
-os.makedirs(data_dir, exist_ok=True)
-
-db_path = os.path.join(data_dir, "market.db")
-print(f"📦 Using SQLite DB at: {db_path}")
+# ✅ Use /tmp for Render (writable directory)
+DB_PATH = os.path.join("/tmp", "market.db")
 
 engine = create_engine(
-    f"sqlite:///{db_path}",
+    f"sqlite:///{DB_PATH}",
     connect_args={"check_same_thread": False},
     echo=False,
     future=True
