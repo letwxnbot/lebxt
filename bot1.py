@@ -270,7 +270,7 @@ DB_PATH = os.path.join(DB_DIR, "market.db")
 print(f"📁 Using SQLite at: {DB_PATH}")
 
 engine = create_engine(
-    f"sqlite:///{DB_PATH}",
+    "sqlite:///data/market.db",
     connect_args={"check_same_thread": False},
     echo=False,
     future=True
