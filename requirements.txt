@@ -8,3 +8,4 @@ pydantic==2.8.2
 pydantic-core==2.20.1
 bip-utils==2.9.3
 playwright==1.48.0
+psycopg2-binary
