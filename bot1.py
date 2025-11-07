@@ -95,6 +95,7 @@ dp = Dispatcher()
 
 print("📋 Registered handlers before definition:", dp.message.handlers)
 
+# Then define /start handler (AFTER dp exists)
 @dp.message(Command("start"))
 async def on_start(msg: types.Message):
     print("🚀 /start triggered!")
@@ -118,10 +119,7 @@ async def on_start(msg: types.Message):
         purchased = db.query(Order).filter(Order.user_id == msg.from_user.id).count()
         stock_count = db.query(Card).filter(Card.status == "in_stock").count()
 
-        # check admin
-        is_admin = msg.from_user.id in ADMIN_IDS
-
-        # main text
+        # main text (your Twxn’s Market layout)
         text = (
             "💳 *Welcome to Twxn’s Prepaid Market!*\n\n"
             "💰 *Account Info:*\n"
@@ -134,44 +132,18 @@ async def on_start(msg: types.Message):
             "Open a *Support Ticket* below or reach out at @letwxn"
         )
 
-        # user buttons
-        kb_buttons = [
-            [InlineKeyboardButton(text="🛒 View Listings", callback_data="home:shop"),
-         InlineKeyboardButton(text="🏦 Make a Deposit", callback_data="home:wallet")],
-        [InlineKeyboardButton(text="📦 Purchase History", callback_data="home:orders")],
-        [InlineKeyboardButton(text="👥 Referrals", callback_data="home:referrals"),
-         InlineKeyboardButton(text="🆘 Support Ticket", callback_data="support:new")],
-    ]
-        # add admin panel
-        if is_admin:
-            kb_buttons.append([InlineKeyboardButton(text="⚙️ Admin Panel", callback_data="admin:home")])
+        # main buttons
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🛒 Browse Cards", callback_data="shop:page:1")],
+            [InlineKeyboardButton(text="💼 Wallet", callback_data="home:wallet")],
+            [InlineKeyboardButton(text="🎁 Referrals", callback_data="referrals")],
+            [InlineKeyboardButton(text="🧾 Orders", callback_data="orders")],
+            [InlineKeyboardButton(text="🆘 Support", callback_data="support:start")]
+        ])
 
-        kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
         await msg.answer(text, parse_mode="Markdown", reply_markup=kb)
     finally:
         db.close()
-
-    if is_admin:
-        rows.append([InlineKeyboardButton(text="⚙️ Admin Panel", callback_data="admin:panel")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-def back_home_button() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back to Home", callback_data="home_back")]]
-    )
-
-def admin_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Add Card", callback_data="adm:add")],
-            [InlineKeyboardButton(text="📋 View Stock", callback_data="adm:view:1")],
-            [InlineKeyboardButton(text="💬 View Support Tickets", callback_data="admin:view_tickets")],
-            [InlineKeyboardButton(text="💸 Load USD Balance", callback_data="adm:load")],
-            [InlineKeyboardButton(text="🧾 View Orders", callback_data="adm:orders:1")],
-            [InlineKeyboardButton(text="⬅️ Back to Home", callback_data="home_back")],
-        ]
-    )
-
 
 print("📋 Registered handlers after definition:", dp.message.handlers)
 
@@ -281,32 +253,31 @@ BOT_TOKEN = os.getenv("BOT_TOKEN") or ""             # REQUIRED
 FERNET_KEY = os.getenv("FERNET_KEY") or ""           # REQUIRED (Fernet base64 key)
 
 # =========================
-# Database setup (PostgreSQL for Render)
+# Database setup (must be BEFORE any asyncio tasks)
 # =========================
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy import create_engine
 import os
+import pathlib
 
 Base = declarative_base()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+# ✅ Use writable directory on Render
+DB_DIR = "/tmp"
+os.makedirs(DB_DIR, exist_ok=True)
+DB_PATH = os.path.join(DB_DIR, "market.db")
 
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is not set! Check Render environment variables.")
+print(f"📁 Using SQLite at: {DB_PATH}")
 
-# Ensure it uses async-safe params
 engine = create_engine(
-    DATABASE_URL,
-    connect_args={},
-    pool_pre_ping=True,
+    f"sqlite:///{DB_PATH}",
+    connect_args={"check_same_thread": False},
     echo=False,
     future=True
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, future=True)
 Base.metadata.create_all(bind=engine)
-
-print("✅ Connected to PostgreSQL successfully.")
 
 # Admin & stock
 ADMIN_IDS        = set(int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip())
@@ -450,6 +421,83 @@ def usd_to_coin_amount(price_usd: Decimal, coin: str) -> Decimal:
         return (Decimal(price_usd) / BTC_USD_RATE).quantize(Decimal("0.00000001"), rounding=ROUND_UP)
     raise ValueError("Unsupported coin")
 
+@dp.message(Command("start"))
+async def on_start(msg: types.Message):
+    print("🚀 /start triggered!")
+
+    db = SessionLocal()
+    try:
+        # ensure user exists
+        u = db.get(User, msg.from_user.id)
+        if not u:
+            u = User(
+                id=msg.from_user.id,
+                username=msg.from_user.username,
+                display_name=msg.from_user.full_name
+            )
+            db.add(u)
+            db.commit()
+
+        # get wallet + stats
+        w_usd = get_or_create_wallet(db, msg.from_user.id, "USD")
+        usd_balance = Decimal(w_usd.balance or 0)
+        purchased = db.query(Order).filter(Order.user_id == msg.from_user.id).count()
+        stock_count = db.query(Card).filter(Card.status == "in_stock").count()
+
+        # check admin
+        is_admin = msg.from_user.id in ADMIN_IDS
+
+        # main text
+        text = (
+            "💳 *Welcome to Twxn’s Prepaid Market!*\n\n"
+            "💰 *Account Info:*\n"
+            f"• Account Balance: *{money(usd_balance)}*\n"
+            f"• Purchased cards: *{purchased}*\n"
+            f"• In stock now: *{stock_count}*\n\n"
+            "📰 *Stock Updates:*\n"
+            f"[Join Here]({STOCK_INVITE_URL})\n\n"
+            "🆘 *Need Help?*\n"
+            "Open a *Support Ticket* below or reach out at @letwxn"
+        )
+
+        # user buttons
+        kb_buttons = [
+            [InlineKeyboardButton(text="🛒 Browse Cards", callback_data="shop:page:1")],
+            [InlineKeyboardButton(text="💼 Wallet", callback_data="home:wallet")],
+            [InlineKeyboardButton(text="🎁 Referrals", callback_data="referrals")],
+            [InlineKeyboardButton(text="🧾 Orders", callback_data="orders")],
+            [InlineKeyboardButton(text="🆘 Support", callback_data="support:start")]
+        ]
+
+        # add admin panel
+        if is_admin:
+            kb_buttons.append([InlineKeyboardButton(text="⚙️ Admin Panel", callback_data="admin:home")])
+
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+        await msg.answer(text, parse_mode="Markdown", reply_markup=kb)
+    finally:
+        db.close()
+
+    if is_admin:
+        rows.append([InlineKeyboardButton(text="⚙️ Admin Panel", callback_data="admin:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def back_home_button() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back to Home", callback_data="home_back")]]
+    )
+
+def admin_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Add Card", callback_data="adm:add")],
+            [InlineKeyboardButton(text="📋 View Stock", callback_data="adm:view:1")],
+            [InlineKeyboardButton(text="💬 View Support Tickets", callback_data="admin:view_tickets")],
+            [InlineKeyboardButton(text="💸 Load USD Balance", callback_data="adm:load")],
+            [InlineKeyboardButton(text="🧾 View Orders", callback_data="adm:orders:1")],
+            [InlineKeyboardButton(text="⬅️ Back to Home", callback_data="home_back")],
+        ]
+    )
 
 # =========================
 # Home Screen (exact layout) + /start + Back
