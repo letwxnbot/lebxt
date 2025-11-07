@@ -10,7 +10,7 @@ requests==2.32.3
 bip-utils==2.10.0
 playwright==1.41.2
 greenlet==3.0.3
-pydantic==2.7.4 --only-binary pydantic,pydantic-core
-pydantic-core==2.18.2 --only-binary pydantic-core
-cryptography==42.0.5 --only-binary cryptography
+pydantic==2.9.2 --only-binary :all:
+pydantic-core==2.41.5 --only-binary :all:
+cryptography==43.0.1 --only-binary :all:
 --prefer-binary
