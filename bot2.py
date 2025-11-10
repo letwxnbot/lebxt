@@ -118,17 +118,70 @@ def enc_text(s: str) -> str:
 def dec_text(s: str) -> str:
     return s
 
-# If you have a function that derives addresses from xpubs, plug it in here
-def derive_addr_from_xpub(xpub: str, coin: str, index: int) -> str:
-    return f"derived_{coin}_{index}"
+# === Deposit helpers (ADD THIS BLOCK) ===
+from decimal import Decimal
+from sqlalchemy import select
 
-def get_or_create_wallet(db, user_id: int, coin: str) -> Wallet:
+BTC_XPUB = os.getenv("BTC_XPUB")
+LTC_XPUB = os.getenv("LTC_XPUB")
+
+def _get_next_index(db, user_id: int, coin: str) -> int:
     w = db.query(Wallet).filter(Wallet.user_id==user_id, Wallet.coin==coin).first()
-    if w:
-        return w
-    w = Wallet(user_id=user_id, coin=coin, balance=Decimal("0"))
-    db.add(w); db.commit(); db.refresh(w)
-    return w
+    if not w:
+        w = Wallet(user_id=user_id, coin=coin, balance=0, address_index=0)
+        db.add(w); db.commit(); db.refresh(w)
+    if w.address_index is None:
+        w.address_index = 0
+    return int(w.address_index)
+
+def _bip84_derive_or_none(xpub: str, index: int) -> str:
+    """
+    Non-fatal derivation: if bip_utils is unavailable on Render,
+    we just return None so UI can prompt admin to fix env/derivation.
+    """
+    try:
+        from bip_utils import Bip84, Bip44Coins
+        coin_map = {
+            "xpub": Bip44Coins.BITCOIN,
+            "Ltub": Bip44Coins.LITECOIN
+        }
+        # Heuristic: pick coin type by xpub prefix
+        if xpub.startswith(("xpub","ypub","zpub")):
+            coin = Bip44Coins.BITCOIN
+        else:
+            coin = Bip44Coins.LITECOIN
+        acct = Bip84.FromXPub(xpub)
+        addr = acct.Change(Bip84.Change.EXTERNAL).AddressIndex(index).PublicKey().ToAddress()
+        return addr
+    except Exception:
+        return None
+
+def ensure_deposit_address(db, user_id: int, coin: str) -> str:
+    """
+    Ensure Wallet exists & has deposit_address.
+    - If deposit_address missing and XPUB available, derive one (best-effort).
+    - If not derivable, keep None (UI will show a friendly note).
+    """
+    w = db.query(Wallet).filter(Wallet.user_id==user_id, Wallet.coin==coin).first()
+    if not w:
+        w = Wallet(user_id=user_id, coin=coin, balance=Decimal("0"), deposit_address=None, address_index=0)
+        db.add(w); db.commit(); db.refresh(w)
+
+    if w.deposit_address:
+        return w.deposit_address
+
+    xpub = BTC_XPUB if coin == "BTC" else LTC_XPUB if coin == "LTC" else None
+    if xpub:
+        idx = _get_next_index(db, user_id, coin)
+        derived = _bip84_derive_or_none(xpub, idx)
+        if derived:
+            w.deposit_address = derived
+            w.address_index = idx + 1
+            db.commit(); db.refresh(w)
+            return w.deposit_address
+
+    # couldn’t derive (no xpub or lib not present) – keep None
+    return None
 
 # --- Playwright balance checker ---
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
@@ -256,29 +309,29 @@ def home_message_text(usd_balance: Decimal, purchased: int, stock_count: int) ->
         f"Open a *Support Ticket* below or reach out at {SUPPORT_HANDLE}"
     )
 
-def main_menu_kb(is_admin=False):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🎁 View Listings", callback_data="shop:page:1"),
-            InlineKeyboardButton(text="💰 Make a Deposit", callback_data="home:wallet")
-        ],
-        [
-            InlineKeyboardButton(text="📦 Purchase History", callback_data="history"),
-        ],
-        [
-            InlineKeyboardButton(text="👥 Referrals", callback_data="referrals"),
-            InlineKeyboardButton(text="🆘 Support Ticket", callback_data="support")
-        ],
-        [
-            InlineKeyboardButton(text="⚙️ Admin Panel", callback_data="admin")
-        ],
-        [
-            InlineKeyboardButton(text="💎 Twxn's Main Listings 💎", callback_data="shop:page:1")
-        ]
-    ])
-    return kb
+# === Main Menu keyboard (REPLACE this function) ===
+import random
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-def back_home_button():
+def home_menu_kb() -> InlineKeyboardMarkup:
+    # Define buttons you want to show
+    # (Removed any duplicate like "Twxn’s listings" as requested)
+    buttons = [
+        InlineKeyboardButton(text="🧾 View Listings", callback_data="shop:page:1"),
+        InlineKeyboardButton(text="💵 Deposit", callback_data="home:deposit"),
+        InlineKeyboardButton(text="🛒 My Purchases", callback_data="home:orders"),
+        InlineKeyboardButton(text="🎁 Referral", callback_data="home:referral"),
+        InlineKeyboardButton(text="🆘 Support", callback_data="home:support"),
+    ]
+
+    # Randomize order, then layout: 1 on first row, 2 per row after
+    random.shuffle(buttons)
+    rows = []
+    if buttons:
+        rows.append([buttons[0]])               # first row: single button
+        for i in range(1, len(buttons), 2):     # following rows: two per row
+            rows.append(buttons[i:i+2])
+
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="home:back")]])
 
 # --- handlers ---
@@ -354,15 +407,20 @@ async def shop_buy_request_cb(cq: types.CallbackQuery):
         sale_price = card.price if card.price and card.price>0 else card.balance
     finally:
         db.close()
-    # verify balance live
-    await cq.message.answer("🧠 Verifying card balance before purchase...")
-    try:
-        site_key = bin_to_site_key(card.bin or "")
-        exp = card.exp if card.exp else None
-        live_bal = await check_card_balance_playwright(site_key, card.cc_number, exp=exp, pin=None, proxy=PROXY_URL)
-    except Exception as e:
-        live_bal = None
-        await cq.message.answer(f"⚠️ Auto-check failed: {e}\nProceeding with stored balance.", reply_markup=back_home_button())
+    # ✅ RE-CHECK BALANCE BEFORE SENDING
+new_balance = await check_card_async(card)
+
+if new_balance is None:
+    await cq.message.answer("❌ Card failed verification (blocked/dead). Refunding…")
+    w_usd.balance += sale_price
+    card.status = "dead"
+    db.commit()
+    return
+
+if new_balance != card.balance:
+    card.balance = new_balance
+    db.commit()
+
     # prompt accordingly
     db = SessionLocal()
     try:
@@ -490,6 +548,14 @@ async def admin_broadcast_receive(msg: types.Message):
                 pass
         ADMIN_BROADCAST_STATE.discard(msg.from_user.id)
         await msg.answer(f"Broadcast sent to {count} users.", reply_markup=types.ReplyKeyboardRemove())
+        
+@dp.callback_query(F.data == "admin:add_card")
+async def admin_add_card_menu(cq: types.CallbackQuery):
+    await cq.message.edit_text(
+        "📝 Send the card in this format:\n\n"
+        "`SITE|BIN|CARDNUMBER|EXP|CVV|BALANCE`",
+        parse_mode="Markdown"
+    )
 
 @dp.callback_query(lambda c: c.data == "admin:users")
 async def admin_users_cb(cq: types.CallbackQuery):
@@ -560,6 +626,82 @@ async def deposit_coin_cb(cq: types.CallbackQuery):
     finally:
         db.close()
     await cq.message.answer(f"📥 Send *{coin}* to:\n`{addr}`\n\nWe credit your *USD* wallet after 2 confirmations.", parse_mode="Markdown", reply_markup=back_home_button())
+# === Admin: Add Cards (ADD THIS BLOCK) ===
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
+
+ADMIN_IDS = {8418864166}  # your admin id(s)
+
+class AddCardSG(StatesGroup):
+    waiting_line = State()
+
+def is_admin(user_id: int) -> bool:
+    return user_id in ADMIN_IDS
+
+def admin_menu_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Add Cards", callback_data="admin:add")],
+        [InlineKeyboardButton(text="📢 Broadcast Stock Count", callback_data="admin:broadcast_stock")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="home:back")],
+    ])
+
+@dp.callback_query(F.data == "admin:add")
+async def admin_add_cards_start(cq: types.CallbackQuery, state: FSMContext):
+    if not is_admin(cq.from_user.id):
+        return await cq.answer("Not allowed.", show_alert=True)
+    await cq.answer()
+    fmt = ("Send one line per card in this format:\n"
+           "`SITE|BIN|CC_NUMBER|EXP|PIN(optional)|BALANCE|CODE`")
+    await state.set_state(AddCardSG.waiting_line)
+    await cq.message.edit_text("➕ *Add Cards*\n\n" + fmt, parse_mode="Markdown")
+
+@dp.message(AddCardSG.waiting_line)
+async def admin_add_cards_receive(msg: types.Message, state: FSMContext):
+    if not is_admin(msg.from_user.id):
+        return
+
+    line = msg.text.strip()
+    try:
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) not in (6,7):
+            raise ValueError("Expect 6 or 7 fields")
+
+        site, bin6, cc, exp = parts[0], parts[1], parts[2], parts[3]
+        if len(parts) == 6:
+            pin = None
+            bal_s, code = parts[4], parts[5]
+        else:
+            pin, bal_s, code = parts[4], parts[5], parts[6]
+
+        bal = Decimal(bal_s)
+
+        db = SessionLocal()
+        try:
+            card = Card(
+                site=site, bin=bin6, cc_number=cc, exp=exp,
+                encrypted_code=enc_text(code),
+                balance=bal, currency="USD", status="in_stock",
+                added_by=msg.from_user.id
+            )
+            db.add(card)
+            db.commit(); db.refresh(card)
+
+            # Broadcast to stock channel if configured
+            try:
+                ch_id = int(os.getenv("STOCK_CHANNEL_ID", "0"))
+                if ch_id != 0:
+                    text = f"🆕 New card added: {site} {bin6} • ${bal:.2f} • id {card.id}"
+                    await bot.send_message(chat_id=ch_id, text=text)
+            except Exception:
+                pass
+
+            await msg.answer(f"✅ Card #{card.id} added.")
+        finally:
+            db.close()
+        await state.clear()
+
+    except Exception as e:
+        await msg.answer(f"❌ Could not add card: {e}\nPlease resend in the exact format.")
 
 # dbstatus for debugging
 @dp.message(Command("dbstatus"))
