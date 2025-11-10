@@ -20,19 +20,23 @@ PROXY_URL = os.getenv("PROXY_URL", "http://brd-customer-hl_ff068f80-zone-twxnpro
 STOCK_INVITE_URL = os.getenv("STOCK_INVITE_URL", "https://t.me/+ntzN_J5td7c2ZGYx")
 SUPPORT_HANDLE = os.getenv("SUPPORT_HANDLE", "@letwxn")
 
-# Database selection: prefer DATABASE_URL, else uploaded file, else /tmp fallback
-DATABASE_URL = os.getenv("DATABASE_URL")
-LOCAL_UPLOADED_DB = "/mnt/data/market.db"   # user uploaded file path
-FALLBACK_DB = os.path.join(os.path.dirname(__file__), "data", "market.db")
-if DATABASE_URL:
-    DB_URL = DATABASE_URL
-elif os.path.exists(LOCAL_UPLOADED_DB):
-    DB_URL = f"sqlite:///{LOCAL_UPLOADED_DB}"
-else:
-    os.makedirs(os.path.dirname(FALLBACK_DB), exist_ok=True)
-    DB_URL = f"sqlite:///{FALLBACK_DB}"
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-print("📁 DB_URL ->", DB_URL)
+Base = declarative_base()
+
+# Prefer PostgreSQL (Render) but fallback to SQLite (local dev)
+DB_URL = os.getenv("DATABASE_URL", "sqlite:///data/market.db")
+
+if DB_URL.startswith("sqlite"):
+    os.makedirs("/data", exist_ok=True)
+
+engine = create_engine(DB_URL, pool_pre_ping=True, connect_args={"check_same_thread": False} if "sqlite" in DB_URL else {}, future=True)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, future=True)
+
+print(f"✅ Database URL in use: {DB_URL}")
+Base.metadata.create_all(bind=engine)
 
 # --- SQLAlchemy models (use models.py if you have it) ---
 from sqlalchemy import create_engine, Column, Integer, BigInteger, String, Numeric, Text, DateTime, ForeignKey
