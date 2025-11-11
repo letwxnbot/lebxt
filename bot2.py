@@ -144,16 +144,85 @@ async def helper_check_balance(number: str, exp: str, code: str) -> dict:
         except Exception as e:
             return {"status": "error", "balance": 0.0, "raw": str(e)}
 
-# ====== Admin FSM for Add Cards ======
-class AddCardSG(StatesGroup):
-    waiting_line = State()
-
-def admin_menu_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Add Cards", callback_data="admin:add")],
-        [InlineKeyboardButton(text="📢 Broadcast Stock Count", callback_data="admin:broadcast")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="home:back")],
+# --- Admin Panel ---
+@dp.callback_query(lambda c: c.data == "admin")
+async def admin_panel_cb(cq: types.CallbackQuery):
+    await cq.answer()
+    if cq.from_user.id not in ADMIN_IDS:
+        await cq.message.answer("🚫 Admins only.", reply_markup=back_home_button())
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Broadcast Message", callback_data="admin:broadcast")],
+        [InlineKeyboardButton(text="🧾 View Orders", callback_data="admin:orders")],
+        [InlineKeyboardButton(text="👥 View Users", callback_data="admin:users")],
+        [InlineKeyboardButton(text="💵 Adjust Balance", callback_data="admin:adjust")],
+        [InlineKeyboardButton(text="➕ Add Cards", callback_data="admin:addcard")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="home:back")]
     ])
+    await cq.message.answer("⚙️ Admin Panel", reply_markup=kb)
+
+# Broadcast flow state
+ADMIN_BROADCAST_WAITING = {}
+
+@dp.callback_query(lambda c: c.data == "admin:broadcast")
+async def admin_broadcast_start(cq: types.CallbackQuery):
+    await cq.answer()
+    if cq.from_user.id not in ADMIN_IDS:
+        await cq.message.answer("🚫 Admins only.", reply_markup=back_home_button()); return
+    ADMIN_BROADCAST_WAITING[cq.from_user.id] = True
+    await cq.message.answer("✉️ Send the message you want to broadcast to all users. Send /cancel to abort.")
+
+@dp.message()
+async def admin_broadcast_receive(msg: types.Message):
+    # If admin is in waiting state, treat the incoming message as broadcast content
+    if msg.from_user.id in ADMIN_BROADCAST_WAITING:
+        if msg.text and msg.text.strip().lower() == "/cancel":
+            ADMIN_BROADCAST_WAITING.pop(msg.from_user.id, None)
+            await msg.answer("Broadcast canceled.", reply_markup=main_menu_kb(is_admin=(msg.from_user.id in ADMIN_IDS)))
+            return
+        # grab all users
+        db = SessionLocal()
+        try:
+            users = db.query(User).all()
+            count = 0
+            for u in users:
+                try:
+                    await bot.send_message(u.id, f"📢 Broadcast from Twxn:\n\n{msg.text}")
+                    count += 1
+                except Exception:
+                    pass
+        finally:
+            db.close()
+        ADMIN_BROADCAST_WAITING.pop(msg.from_user.id, None)
+        await msg.answer(f"Broadcast sent to {count} users.", reply_markup=main_menu_kb(is_admin=(msg.from_user.id in ADMIN_IDS)))
+
+# Admin: view users / orders (simple listing)
+@dp.callback_query(lambda c: c.data == "admin:users")
+async def admin_users_cb(cq: types.CallbackQuery):
+    await cq.answer()
+    if cq.from_user.id not in ADMIN_IDS:
+        await cq.message.answer("🚫 Admins only.", reply_markup=back_home_button()); return
+    db = SessionLocal()
+    try:
+        users = db.query(User).all()
+        lines = [f"{u.id} — {u.username or ''} — {u.display_name or ''}" for u in users[:200]]
+    finally:
+        db.close()
+    await cq.message.answer("👥 Users:\n\n" + "\n".join(lines), reply_markup=back_home_button())
+
+@dp.callback_query(lambda c: c.data == "admin:orders")
+async def admin_orders_cb(cq: types.CallbackQuery):
+    await cq.answer()
+    if cq.from_user.id not in ADMIN_IDS:
+        await cq.message.answer("🚫 Admins only.", reply_markup=back_home_button()); return
+    db = SessionLocal()
+    try:
+        orders = db.query(Order).order_by(Order.id.desc()).limit(100).all()
+        lines = [f"#{o.id}: user {o.user_id} card {o.card_id} ${o.price_usd}" for o in orders]
+    finally:
+        db.close()
+    await cq.message.answer("🧾 Orders:\n\n" + "\n".join(lines), reply_markup=back_home_button())
+
 
 # ====== Handlers ======
 @dp.message(Command("start"))
