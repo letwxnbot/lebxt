@@ -1,5 +1,4 @@
 pydantic==2.7.1
-pydantic-core==2.41.1
 aiohttp==3.13.2
 aiogram==3.5.0
 SQLAlchemy==2.0.35
