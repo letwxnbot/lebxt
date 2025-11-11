@@ -13,4 +13,5 @@ gunicorn==21.2.0
 requests==2.32.3
 bip-utils==2.10.0
 coincurve==21.0.0
-crcmod
+crcmod-plus==2.3.1
+
