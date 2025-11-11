@@ -5,8 +5,8 @@ SQLAlchemy==2.0.30
 psycopg2-binary==2.9.11
 cryptography==43.0.1
 python-dotenv==1.0.1
-pydantic==2.7.1
-pydantic-core==2.41.1
+pydantic==2.7.4
+pydantic-core==2.18.4
 Telethon==1.42.0
 Flask==3.0.3
 requests==2.32.3
