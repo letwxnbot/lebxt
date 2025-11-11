@@ -1,10 +1,10 @@
-# --- pinned versions with binary wheels ---
+# --- pinned versions with prebuilt wheels ---
 pydantic==2.7.1
 pydantic-core==2.41.1
 aiohttp==3.13.2
 aiogram==3.5.0
 SQLAlchemy==2.0.35
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.11
 cryptography==42.0.8
 python-dotenv==1.0.1
 bip-utils==2.9.3
