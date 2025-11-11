@@ -98,7 +98,7 @@ def _derive_address_from_xpub(xpub: str, index: int, coin_type: str) -> Optional
     if not xpub:
         return None
     try:
-        from bip_utils import Bip84, Bip84Coins
+        from bitcoinlib.wallets import Wallet
         coin = Bip84Coins.BITCOIN if coin_type == "BTC" else Bip84Coins.LITECOIN
         acct = Bip84.FromXPub(xpub, coin)
         return acct.Change(Bip84.Change.EXTERNAL).AddressIndex(index).PublicKey().ToAddress()
@@ -137,19 +137,19 @@ def ensure_deposit_address(db, user_id: int, coin: str) -> Optional[str]:
     return None
 
 # ========= HELPER SERVICE =========
-async def helper_check_balance(number: str, exp: str, code: str) -> dict:
-    url = f"{HELPER_URL.rstrip('/')}/check_balance"
-    payload = {"number": number, "exp": exp, "code": code}
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(url, json=payload, timeout=45) as r:
-                if r.status != 200:
-                    return {"status": "error", "balance": 0.0, "raw": f"http {r.status}"}
-                return await r.json()
-        except asyncio.TimeoutError:
-            return {"status": "timeout", "balance": 0.0}
-        except Exception as e:
-            return {"status": "error", "balance": 0.0, "raw": str(e)}
+async def helper_check_balance(number, exp, code):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(BALANCE_CHECKER_URL, json={"number": number, "exp": exp, "code": code}) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    return data
+                else:
+                    return {"status": "error", "balance": 0}
+    except Exception as e:
+        print("Balance checker error:", e)
+        return {"status": "error", "balance": 0}
+
 
 # ========= HOME =========
 def home_message_text(usd_balance: Decimal, purchased: int, stock_count: int) -> str:

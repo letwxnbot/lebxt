@@ -137,19 +137,19 @@ def ensure_deposit_address(db, user_id: int, coin: str) -> Optional[str]:
     return None
 
 # ========= HELPER SERVICE =========
-async def helper_check_balance(number: str, exp: str, code: str) -> dict:
-    url = f"{HELPER_URL.rstrip('/')}/check_balance"
-    payload = {"number": number, "exp": exp, "code": code}
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(url, json=payload, timeout=45) as r:
-                if r.status != 200:
-                    return {"status": "error", "balance": 0.0, "raw": f"http {r.status}"}
-                return await r.json()
-        except asyncio.TimeoutError:
-            return {"status": "timeout", "balance": 0.0}
-        except Exception as e:
-            return {"status": "error", "balance": 0.0, "raw": str(e)}
+async def helper_check_balance(number, exp, code):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(BALANCE_CHECKER_URL, json={"number": number, "exp": exp, "code": code}) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    return data
+                else:
+                    return {"status": "error", "balance": 0}
+    except Exception as e:
+        print("Balance checker error:", e)
+        return {"status": "error", "balance": 0}
+
 
 # ========= HOME =========
 def home_message_text(usd_balance: Decimal, purchased: int, stock_count: int) -> str:
@@ -230,6 +230,44 @@ async def home_back(cq: types.CallbackQuery):
         )
     finally:
         db.close()
+from bip_utils import Bip44, Bip44Coins, Bip44Changes
+import hashlib
+
+def ensure_deposit_address(db, user_id: int, coin: str):
+    wallet = db.query(Wallet).filter(Wallet.user_id == user_id, Wallet.coin == coin).first()
+    if not wallet:
+        wallet = Wallet(user_id=user_id, coin=coin, balance=0)
+        db.add(wallet)
+        db.commit()
+
+    # Return existing address if already assigned
+    if wallet.deposit_address:
+        return wallet.deposit_address
+
+    BTC_XPUB = os.getenv("BTC_XPUB")
+    LTC_XPUB = os.getenv("LTC_XPUB")
+
+    try:
+        if coin == "BTC" and BTC_XPUB:
+            ctx = Bip44.FromExtendedKey(BTC_XPUB, Bip44Coins.BITCOIN)
+        elif coin == "LTC" and LTC_XPUB:
+            ctx = Bip44.FromExtendedKey(LTC_XPUB, Bip44Coins.LITECOIN)
+        else:
+            raise ValueError("No XPUB found")
+
+        index = wallet.address_index or 0
+        addr = ctx.Change(Bip44Changes.CHAIN_EXT).AddressIndex(index).PublicKey().ToAddress()
+        wallet.deposit_address = addr
+        wallet.address_index = index
+        db.commit()
+        return addr
+
+    except Exception as e:
+        print(f"[wallet] {coin} address derivation failed: {e}")
+        fallback_addr = f"test_{coin.lower()}_addr_{hashlib.md5(str(user_id).encode()).hexdigest()[:8]}"
+        wallet.deposit_address = fallback_addr
+        db.commit()
+        return fallback_addr
 
 # ========= WALLET / DEPOSIT =========
 @dp.callback_query(F.data == "home:wallet")
