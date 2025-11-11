@@ -36,6 +36,7 @@ class Slip44:
     LITECOIN: int = 2
     DOGECOIN: int = 3
     DASH: int = 5
+    DIGIBYTE: int = 20
     ETHEREUM: int = 60
     ETHEREUM_CLASSIC: int = 61
     ICON: int = 74
@@ -50,6 +51,7 @@ class Slip44:
     EOS: int = 194
     TRON: int = 195
     BITCOIN_SV: int = 236
+    NIMIQ: int = 242
     ALGORAND: int = 283
     ZILLIQA: int = 313
     TERRA: int = 330
@@ -74,6 +76,7 @@ class Slip44:
     HARMONY_ONE: int = 1023
     ONTOLOGY: int = 1024
     TEZOS: int = 1729
+    MAVRYK: int = 1969
     CARDANO: int = 1815
     AVALANCHE: int = 9000
     CELO: int = 52752

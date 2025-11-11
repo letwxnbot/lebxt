@@ -1,7 +1,7 @@
 # Version
 from bip_utils._version import __version__
 
-# Address computation
+# Address decoding/encoding
 from bip_utils.addr import (
     AdaByronAddrDecoder, AdaByronAddrTypes, AdaByronIcarusAddr, AdaByronIcarusAddrEncoder, AdaByronLegacyAddr,
     AdaByronLegacyAddrEncoder, AdaShelleyAddr, AdaShelleyAddrDecoder, AdaShelleyAddrEncoder, AdaShelleyAddrNetworkTags,
@@ -13,8 +13,10 @@ from bip_utils.addr import (
     BchP2SHAddrEncoder, EgldAddr, EgldAddrDecoder, EgldAddrEncoder, EosAddr, EosAddrDecoder, EosAddrEncoder,
     ErgoNetworkTypes, ErgoP2PKHAddr, ErgoP2PKHAddrDecoder, ErgoP2PKHAddrEncoder, EthAddr, EthAddrDecoder,
     EthAddrEncoder, FilSecp256k1Addr, FilSecp256k1AddrDecoder, FilSecp256k1AddrEncoder, IcxAddr, IcxAddrDecoder,
-    IcxAddrEncoder, InjAddr, InjAddrDecoder, InjAddrEncoder, NanoAddr, NanoAddrDecoder, NanoAddrEncoder, NearAddr,
-    NearAddrDecoder, NearAddrEncoder, NeoAddr, NeoAddrDecoder, NeoAddrEncoder, OkexAddr, OkexAddrDecoder,
+    IcxAddrEncoder, InjAddr, InjAddrDecoder, InjAddrEncoder, MvrkAddr, MvrkAddrDecoder, MvrkAddrEncoder,
+    MvrkAddrPrefixes, NanoAddr, NanoAddrDecoder, NanoAddrEncoder, NearAddr, NearAddrDecoder, NearAddrEncoder, NeoAddr,
+    NeoAddrDecoder, NeoAddrEncoder, NeoLegacyAddr, NeoLegacyAddrDecoder, NeoLegacyAddrEncoder, NeoN3Addr,
+    NeoN3AddrDecoder, NeoN3AddrEncoder, NimAddr, NimAddrDecoder, NimAddrEncoder, OkexAddr, OkexAddrDecoder,
     OkexAddrEncoder, OneAddr, OneAddrDecoder, OneAddrEncoder, P2PKHAddr, P2PKHAddrDecoder, P2PKHAddrEncoder,
     P2PKHPubKeyModes, P2SHAddr, P2SHAddrDecoder, P2SHAddrEncoder, P2TRAddr, P2TRAddrDecoder, P2TRAddrEncoder,
     P2WPKHAddr, P2WPKHAddrDecoder, P2WPKHAddrEncoder, SolAddr, SolAddrDecoder, SolAddrEncoder, SubstrateEd25519Addr,
@@ -161,7 +163,9 @@ from bip_utils.utils.crypto import (
     DoubleSha256, Hash160, HmacSha256, HmacSha512, Kekkak256, Pbkdf2HmacSha512, Ripemd160, Scrypt, Sha3_256, Sha256,
     Sha512, Sha512_256, XModemCrc
 )
-from bip_utils.utils.misc import AlgoUtils, BitUtils, BytesUtils, DataBytes, IntegerUtils, StringUtils
+from bip_utils.utils.misc import (
+    AlgoUtils, Base32Decoder, Base32Encoder, BitUtils, BytesUtils, DataBytes, IntegerUtils, StringUtils
+)
 from bip_utils.utils.mnemonic import MnemonicChecksumError
 
 # WIF

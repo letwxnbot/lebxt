@@ -56,6 +56,16 @@ Base.metadata.create_all(bind=engine)
 # ========= AIROGRAM =========
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+# === Admin notification setup ===
+ADMIN_IDS = [8418864166]  # your Telegram user ID
+
+async def notify_admins(text: str):
+    """Send a message to all admins when something important happens."""
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, text, parse_mode="Markdown")
+        except Exception as e:
+            print(f"⚠️ Failed to notify admin {admin_id}: {e}")
 
 # ========= HELPERS =========
 def is_admin(uid: int) -> bool:
@@ -318,6 +328,62 @@ async def deposit_addr(cq: types.CallbackQuery):
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="home:wallet")]])
     )
+import time
+import requests
+from decimal import Decimal
+
+import time
+import requests
+from decimal import Decimal
+
+async def monitor_deposits():
+    print("🔁 Starting deposit monitor loop...")
+    while True:
+        try:
+            db = SessionLocal()
+            wallets = db.query(Wallet).filter(Wallet.coin.in_(["BTC", "LTC"]), Wallet.deposit_address != None).all()
+            for w in wallets:
+                addr = w.deposit_address
+                coin = w.coin
+
+                if coin == "BTC":
+                    api_url = f"https://api.blockcypher.com/v1/btc/main/addrs/{addr}/balance"
+                elif coin == "LTC":
+                    api_url = f"https://api.blockcypher.com/v1/ltc/main/addrs/{addr}/balance"
+                else:
+                    continue
+
+                try:
+                    r = requests.get(api_url, timeout=10)
+                    data = r.json()
+                    confirmed_sats = data.get("final_balance", 0)
+                    confirmed_btc = Decimal(confirmed_sats) / Decimal(1e8)
+
+                    # 💰 Fetch live BTC/LTC -> USD rates
+                    try:
+                        cg = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=usd", timeout=10)
+                        rates = cg.json()
+                        btc_usd = Decimal(rates.get("bitcoin", {}).get("usd", 100000))
+                        ltc_usd = Decimal(rates.get("litecoin", {}).get("usd", 100))
+                    except Exception:
+                        btc_usd = Decimal(100000)
+                        ltc_usd = Decimal(100)
+
+                    rate = btc_usd if coin == "BTC" else ltc_usd
+                    usd_equivalent = confirmed_btc * rate
+
+                    if confirmed_btc > 0:
+                        w_usd = get_or_create_wallet(db, w.user_id, "USD")
+                        w_usd.balance += usd_equivalent
+                        w.balance = 0
+                        db.commit()
+                        print(f"💰 Credited {usd_equivalent} USD to user {w.user_id} ({coin})")
+                except Exception as api_err:
+                    print(f"⚠️ API error for {coin} addr {addr}: {api_err}")
+            db.close()
+        except Exception as e:
+            print(f"Deposit monitor error: {e}")
+        await asyncio.sleep(300)
 
 # ========= SHOP =========
 def listings_header(db, uid: int) -> str:
@@ -715,6 +781,7 @@ async def noop_cb(cq: types.CallbackQuery):
 async def main():
     me = await bot.get_me()
     print(f"🤖 Running as: @{me.username}")
+    asyncio.create_task(monitor_deposits())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

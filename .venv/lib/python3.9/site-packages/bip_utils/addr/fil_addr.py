@@ -56,7 +56,7 @@ class _FilAddrUtils:
     def ComputeChecksum(pub_key_hash: bytes,
                         addr_type: FillAddrTypes) -> bytes:
         """
-        Compute checksum in EOS format.
+        Compute checksum in Filecoin format.
 
         Args:
             pub_key_hash (bytes)     : Public key hash
@@ -101,7 +101,8 @@ class _FilAddrUtils:
         pub_key_hash_bytes, checksum_bytes = AddrDecUtils.SplitPartsByChecksum(addr_dec_bytes,
                                                                                Blake2b32.DigestSize())
         # Validate checksum
-        AddrDecUtils.ValidateChecksum(pub_key_hash_bytes, checksum_bytes,
+        AddrDecUtils.ValidateChecksum(pub_key_hash_bytes,
+                                      checksum_bytes,
                                       lambda pub_key_bytes: _FilAddrUtils.ComputeChecksum(pub_key_bytes, addr_type))
 
         return pub_key_hash_bytes

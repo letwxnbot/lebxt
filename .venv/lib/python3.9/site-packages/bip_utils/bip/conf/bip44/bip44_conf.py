@@ -24,18 +24,18 @@
 from bip_utils.addr import (
     AdaByronIcarusAddrEncoder, AlgoAddrEncoder, AptosAddrEncoder, AtomAddrEncoder, AvaxPChainAddrEncoder,
     AvaxXChainAddrEncoder, BchP2PKHAddrEncoder, EgldAddrEncoder, EosAddrEncoder, ErgoNetworkTypes, ErgoP2PKHAddrEncoder,
-    EthAddrEncoder, FilSecp256k1AddrEncoder, IcxAddrEncoder, InjAddrEncoder, NanoAddrEncoder, NearAddrEncoder,
-    NeoAddrEncoder, OkexAddrEncoder, OneAddrEncoder, P2PKHAddrEncoder, SolAddrEncoder, SubstrateEd25519AddrEncoder,
-    SuiAddrEncoder, TrxAddrEncoder, XlmAddrEncoder, XlmAddrTypes, XmrAddrEncoder, XrpAddrEncoder, XtzAddrEncoder,
-    XtzAddrPrefixes, ZilAddrEncoder
+    EthAddrEncoder, FilSecp256k1AddrEncoder, IcxAddrEncoder, InjAddrEncoder, MvrkAddrEncoder, MvrkAddrPrefixes,
+    NanoAddrEncoder, NearAddrEncoder, NeoLegacyAddrEncoder, NeoN3AddrEncoder, NimAddrEncoder, OkexAddrEncoder,
+    OneAddrEncoder, P2PKHAddrEncoder, SolAddrEncoder, SubstrateEd25519AddrEncoder, SuiAddrEncoder, TrxAddrEncoder,
+    XlmAddrEncoder, XlmAddrTypes, XmrAddrEncoder, XrpAddrEncoder, XtzAddrEncoder, XtzAddrPrefixes, ZilAddrEncoder
 )
 from bip_utils.bip.bip32 import (
     Bip32Const, Bip32KeyNetVersions, Bip32KholawEd25519, Bip32Slip10Ed25519, Bip32Slip10Ed25519Blake2b,
     Bip32Slip10Nist256p1, Bip32Slip10Secp256k1
 )
 from bip_utils.bip.conf.common import (
-    DER_PATH_HARDENED_FULL, DER_PATH_HARDENED_SHORT, DER_PATH_NON_HARDENED_FULL, BipBitcoinCashConf, BipCoinConf,
-    BipCoinFctCallsConf, BipLitecoinConf
+    DER_PATH_HARDENED_FULL, DER_PATH_HARDENED_MID, DER_PATH_HARDENED_SHORT, DER_PATH_NON_HARDENED_FULL,
+    BipBitcoinCashConf, BipCoinConf, BipCoinFctCallsConf, BipLitecoinConf
 )
 from bip_utils.cardano.bip32.cardano_icarus_bip32 import CardanoIcarusBip32
 from bip_utils.coin_conf import CoinsConf
@@ -387,6 +387,21 @@ class Bip44Conf:
         },
     )
 
+    # Configuration for Celestia
+    Celestia: BipCoinConf = BipCoinConf(
+        coin_names=CoinsConf.Celestia.CoinNames(),
+        coin_idx=Slip44.ATOM,
+        is_testnet=False,
+        def_path=DER_PATH_NON_HARDENED_FULL,
+        key_net_ver=_BIP44_BTC_KEY_NET_VER_MAIN,
+        wif_net_ver=None,
+        bip32_cls=Bip32Slip10Secp256k1,
+        addr_cls=AtomAddrEncoder,
+        addr_params={
+            "hrp": CoinsConf.Celestia.ParamByKey("addr_hrp"),
+        },
+    )
+
     # Configuration for Celo
     Celo: BipCoinConf = BipCoinConf(
         coin_names=CoinsConf.Celo.CoinNames(),
@@ -474,6 +489,22 @@ class Bip44Conf:
         },
     )
 
+    # Configuration for Digibyte main net
+    DigibyteMainNet: BipCoinConf = BipCoinConf(
+        coin_names=CoinsConf.DigibyteMainNet.CoinNames(),
+        coin_idx=Slip44.DIGIBYTE,
+        is_testnet=False,
+        def_path=DER_PATH_NON_HARDENED_FULL,
+        key_net_ver=Bip32KeyNetVersions(b"\x04\x88\xb2\x1e",  # DGB xpub
+                                        b"\x04\x88\xad\xe4"),  # DGB xprv
+        wif_net_ver=CoinsConf.DigibyteMainNet.ParamByKey("wif_net_ver"),
+        bip32_cls=Bip32Slip10Secp256k1,
+        addr_cls=P2PKHAddrEncoder,
+        addr_params={
+            "net_ver": CoinsConf.DigibyteMainNet.ParamByKey("p2pkh_net_ver"),
+        },
+    )
+
     # Configuration for Dogecoin main net
     DogecoinMainNet: BipCoinConf = BipCoinConf(
         coin_names=CoinsConf.DogecoinMainNet.CoinNames(),
@@ -502,6 +533,21 @@ class Bip44Conf:
         addr_cls=P2PKHAddrEncoder,
         addr_params={
             "net_ver": CoinsConf.DogecoinTestNet.ParamByKey("p2pkh_net_ver"),
+        },
+    )
+
+    # Configuration for dYdX
+    DYDX: BipCoinConf = BipCoinConf(
+        coin_names=CoinsConf.DYDX.CoinNames(),
+        coin_idx=Slip44.ATOM,
+        is_testnet=False,
+        def_path=DER_PATH_NON_HARDENED_FULL,
+        key_net_ver=_BIP44_BTC_KEY_NET_VER_MAIN,
+        wif_net_ver=None,
+        bip32_cls=Bip32Slip10Secp256k1,
+        addr_cls=AtomAddrEncoder,
+        addr_params={
+            "hrp": CoinsConf.DYDX.ParamByKey("addr_hrp"),
         },
     )
 
@@ -842,6 +888,19 @@ class Bip44Conf:
         },
     )
 
+    # Configuration for Mavryk
+    Mavryk: BipCoinConf = BipCoinConf(
+        coin_names=CoinsConf.Mavryk.CoinNames(),
+        coin_idx=Slip44.MAVRYK,
+        is_testnet=False,
+        def_path=DER_PATH_HARDENED_MID,
+        key_net_ver=_BIP44_BTC_KEY_NET_VER_MAIN,
+        wif_net_ver=None,
+        bip32_cls=Bip32Slip10Ed25519,
+        addr_cls=MvrkAddrEncoder,
+        addr_params={"prefix": MvrkAddrPrefixes.MV1},
+    )
+
     # Configuration for Metis
     Metis: BipCoinConf = BipCoinConf(
         coin_names=CoinsConf.Metis.CoinNames(),
@@ -907,19 +966,65 @@ class Bip44Conf:
         addr_params={},
     )
 
-    # Configuration for Neo
-    Neo: BipCoinConf = BipCoinConf(
-        coin_names=CoinsConf.Neo.CoinNames(),
+    # For compatibility, later assigned to NeoLegacy
+    Neo: BipCoinConf
+
+    # Configuration for Neo legacy
+    NeoLegacy: BipCoinConf = BipCoinConf(
+        coin_names=CoinsConf.NeoLegacy.CoinNames(),
         coin_idx=Slip44.NEO,
         is_testnet=False,
         def_path=DER_PATH_NON_HARDENED_FULL,
         key_net_ver=_BIP44_BTC_KEY_NET_VER_MAIN,
-        wif_net_ver=None,
+        wif_net_ver=CoinsConf.NeoLegacy.ParamByKey("wif_net_ver"),
         bip32_cls=Bip32Slip10Nist256p1,
-        addr_cls=NeoAddrEncoder,
+        addr_cls=NeoLegacyAddrEncoder,
         addr_params={
-            "ver": CoinsConf.Neo.ParamByKey("addr_ver"),
+            "ver": CoinsConf.NeoLegacy.ParamByKey("addr_ver"),
         },
+    )
+
+    # Configuration for Neo N3
+    NeoN3: BipCoinConf = BipCoinConf(
+        coin_names=CoinsConf.NeoN3.CoinNames(),
+        coin_idx=Slip44.NEO,
+        is_testnet=False,
+        def_path=DER_PATH_NON_HARDENED_FULL,
+        key_net_ver=_BIP44_BTC_KEY_NET_VER_MAIN,
+        wif_net_ver=CoinsConf.NeoN3.ParamByKey("wif_net_ver"),
+        bip32_cls=Bip32Slip10Nist256p1,
+        addr_cls=NeoN3AddrEncoder,
+        addr_params={
+            "ver": CoinsConf.NeoN3.ParamByKey("addr_ver"),
+        },
+    )
+
+    # Configuration for Neutron
+    Neutron: BipCoinConf = BipCoinConf(
+        coin_names=CoinsConf.Neutron.CoinNames(),
+        coin_idx=Slip44.ATOM,
+        is_testnet=False,
+        def_path=DER_PATH_NON_HARDENED_FULL,
+        key_net_ver=_BIP44_BTC_KEY_NET_VER_MAIN,
+        wif_net_ver=None,
+        bip32_cls=Bip32Slip10Secp256k1,
+        addr_cls=AtomAddrEncoder,
+        addr_params={
+            "hrp": CoinsConf.Neutron.ParamByKey("addr_hrp"),
+        },
+    )
+
+    # Configuration for Nimiq
+    Nimiq: BipCoinConf = BipCoinConf(
+        coin_names=CoinsConf.Nimiq.CoinNames(),
+        coin_idx=Slip44.NIMIQ,
+        is_testnet=False,
+        def_path=DER_PATH_HARDENED_MID,
+        key_net_ver=_BIP44_BTC_KEY_NET_VER_MAIN,
+        wif_net_ver=None,
+        bip32_cls=Bip32Slip10Ed25519,
+        addr_cls=NimAddrEncoder,
+        addr_params={},
     )
 
     # Configuration for NG
@@ -983,7 +1088,7 @@ class Bip44Conf:
         key_net_ver=_BIP44_BTC_KEY_NET_VER_MAIN,
         wif_net_ver=None,
         bip32_cls=Bip32Slip10Nist256p1,
-        addr_cls=NeoAddrEncoder,
+        addr_cls=NeoLegacyAddrEncoder,
         addr_params={
             "ver": CoinsConf.Ontology.ParamByKey("addr_ver"),
         },
@@ -1174,7 +1279,7 @@ class Bip44Conf:
         coin_names=CoinsConf.Tezos.CoinNames(),
         coin_idx=Slip44.TEZOS,
         is_testnet=False,
-        def_path="0'/0'",
+        def_path=DER_PATH_HARDENED_MID,
         key_net_ver=_BIP44_BTC_KEY_NET_VER_MAIN,
         wif_net_ver=None,
         bip32_cls=Bip32Slip10Ed25519,
@@ -1277,3 +1382,7 @@ class Bip44Conf:
         addr_cls=ZilAddrEncoder,
         addr_params={},
     )
+
+
+# For compatibility
+Bip44Conf.Neo = Bip44Conf.NeoLegacy

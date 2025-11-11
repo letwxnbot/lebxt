@@ -290,6 +290,14 @@ class CoinsConf:
         },
     )
 
+    # Configuration for Celestia
+    Celestia: CoinConf = CoinConf(
+        coin_name=CoinNames("Celestia", "TIA"),
+        params={
+            "addr_hrp": Slip173.CELESTIA,
+        },
+    )
+
     # Configuration for Celo
     Celo: CoinConf = CoinConf(
         coin_name=CoinNames("Celo", "CELO"),
@@ -348,6 +356,16 @@ class CoinsConf:
         },
     )
 
+    # Configuration for Digibyte main net
+    DigibyteMainNet: CoinConf = CoinConf(
+        coin_name=CoinNames("Digibyte", "DGB"),
+        params={
+            "p2pkh_net_ver": b"\x1e",
+            "p2sh_net_ver": b"\x16",
+            "wif_net_ver": b"\x9e",
+        },
+    )
+
     # Configuration for Dogecoin main net
     DogecoinMainNet: CoinConf = CoinConf(
         coin_name=CoinNames("Dogecoin", "DOGE"),
@@ -365,6 +383,14 @@ class CoinsConf:
             "p2pkh_net_ver": b"\x71",
             "p2sh_net_ver": _BTC_P2SH_NET_VER_TN,
             "wif_net_ver": b"\xf1",
+        },
+    )
+
+    # Configuration for dYdX
+    DYDX: CoinConf = CoinConf(
+        coin_name=CoinNames("dYdX", "DYDX"),
+        params={
+            "addr_hrp": Slip173.DYDX,
         },
     )
 
@@ -566,6 +592,12 @@ class CoinsConf:
         },
     )
 
+    # Configuration for Mavryk
+    Mavryk: CoinConf = CoinConf(
+        coin_name=CoinNames("Mavryk", "MVRK"),
+        params={},
+    )
+
     # Configuration for Metis
     Metis: CoinConf = CoinConf(
         coin_name=CoinNames("Metis", "METIS"),
@@ -632,11 +664,44 @@ class CoinsConf:
         params={},
     )
 
-    # Configuration for Neo
-    Neo: CoinConf = CoinConf(
+    # For compatibility, later assigned to NeoLegacy
+    Neo: CoinConf
+
+    # Configuration for Neo legacy
+    NeoLegacy: CoinConf = CoinConf(
         coin_name=CoinNames("NEO", "NEO"),
         params={
             "addr_ver": b"\x17",
+            "addr_prefix": b"\x21",
+            "addr_suffix": b"\xac",
+            "wif_net_ver": _BTC_WIF_NET_VER_MN,
+        },
+    )
+
+    # Configuration for Neo N3
+    NeoN3: CoinConf = CoinConf(
+        coin_name=CoinNames("NEO", "NEO"),
+        params={
+            "addr_ver": b"\x35",
+            "addr_prefix": b"\x0c\x21",
+            "addr_suffix": b"\x41\x56\xe7\xb3\x27",
+            "wif_net_ver": _BTC_WIF_NET_VER_MN,
+        },
+    )
+
+    # Configuration for Neutron
+    Neutron: CoinConf = CoinConf(
+        coin_name=CoinNames("Neutron", "NTRN"),
+        params={
+            "addr_hrp": Slip173.NEUTRON,
+        },
+    )
+
+    # Configuration for Nimiq
+    Nimiq: CoinConf = CoinConf(
+        coin_name=CoinNames("Nimiq", "NIM"),
+        params={
+            "addr_prefix": "NQ"
         },
     )
 
@@ -835,3 +900,7 @@ class CoinsConf:
             "addr_hrp": Slip173.ZILLIQA,
         },
     )
+
+
+# For compatibility
+CoinsConf.Neo = CoinsConf.NeoLegacy
