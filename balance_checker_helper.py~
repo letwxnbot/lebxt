@@ -21,7 +21,6 @@ API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))          # required
 API_HASH = os.getenv("TELEGRAM_API_HASH", "")            # required
 PHONE_NUMBER = os.getenv("TELEGRAM_PHONE", "+12149312105")
 SESSION_DIR = os.path.join(os.getcwd(), "data")
-os.makedirs(SESSION_DIR, exist_ok=True)
 SESSION_NAME = os.getenv("SESSION_NAME", "checker")
 
 CHECK_BOT = os.getenv("CHECK_BOT", "AllGccCheckersBot")  # no leading @ needed
