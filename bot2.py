@@ -240,33 +240,29 @@ async def home_back(cq: types.CallbackQuery):
         )
     finally:
         db.close()
-from bip_utils import Bip44, Bip44Coins, Bip44Changes
-import hashlib
+from hdwallet import HDWallet
+from hdwallet.cryptocurrencies import Bitcoin, Litecoin
 
-def ensure_deposit_address(db, user_id: int, coin: str):
-    wallet = db.query(Wallet).filter(Wallet.user_id == user_id, Wallet.coin == coin).first()
-    if not wallet:
-        wallet = Wallet(user_id=user_id, coin=coin, balance=0)
-        db.add(wallet)
-        db.commit()
-
-    # Return existing address if already assigned
-    if wallet.deposit_address:
-        return wallet.deposit_address
-
+def derive_address_from_xpub(coin: str, index: int, user_id: int, db, wallet) -> str:
     BTC_XPUB = os.getenv("BTC_XPUB")
     LTC_XPUB = os.getenv("LTC_XPUB")
 
     try:
         if coin == "BTC" and BTC_XPUB:
-            ctx = Bip44.FromExtendedKey(BTC_XPUB, Bip44Coins.BITCOIN)
+            xpub = BTC_XPUB
+            crypto = Bitcoin
         elif coin == "LTC" and LTC_XPUB:
-            ctx = Bip44.FromExtendedKey(LTC_XPUB, Bip44Coins.LITECOIN)
+            xpub = LTC_XPUB
+            crypto = Litecoin
         else:
-            raise ValueError("No XPUB found")
+            raise ValueError("No XPUB found for this coin")
 
-        index = wallet.address_index or 0
-        addr = ctx.Change(Bip44Changes.CHAIN_EXT).AddressIndex(index).PublicKey().ToAddress()
+        # create wallet
+        hdwallet = HDWallet(cryptocurrency=crypto)
+        # derive address
+        hdwallet.from_xpublic(xpub=xpub, path=f"m/44'/{crypto.COIN_TYPE}'/0'/0/{index}")
+        addr = hdwallet.address()
+
         wallet.deposit_address = addr
         wallet.address_index = index
         db.commit()
@@ -278,6 +274,7 @@ def ensure_deposit_address(db, user_id: int, coin: str):
         wallet.deposit_address = fallback_addr
         db.commit()
         return fallback_addr
+
 
 # ========= WALLET / DEPOSIT =========
 @dp.callback_query(F.data == "home:wallet")

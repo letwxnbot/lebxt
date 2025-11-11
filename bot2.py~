@@ -56,6 +56,16 @@ Base.metadata.create_all(bind=engine)
 # ========= AIROGRAM =========
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+# === Admin notification setup ===
+ADMIN_IDS = [8418864166]  # your Telegram user ID
+
+async def notify_admins(text: str):
+    """Send a message to all admins when something important happens."""
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, text, parse_mode="Markdown")
+        except Exception as e:
+            print(f"⚠️ Failed to notify admin {admin_id}: {e}")
 
 # ========= HELPERS =========
 def is_admin(uid: int) -> bool:
