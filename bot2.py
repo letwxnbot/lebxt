@@ -98,7 +98,7 @@ def _derive_address_from_xpub(xpub: str, index: int, coin_type: str) -> Optional
     if not xpub:
         return None
     try:
-        from bip_utils import Bip84, Bip84Coins
+        from bitcoinlib.wallets import Wallet
         coin = Bip84Coins.BITCOIN if coin_type == "BTC" else Bip84Coins.LITECOIN
         acct = Bip84.FromXPub(xpub, coin)
         return acct.Change(Bip84.Change.EXTERNAL).AddressIndex(index).PublicKey().ToAddress()

@@ -1,14 +1,17 @@
 # bot2.py — Twxn’s Prepaid Market (Aiogram v3)
-# - Admin panel restored (Add Cards, Broadcast, View Sales placeholder, Support Tickets placeholder)
-# - Add Cards => auto price 40% of balance + broadcast to stock channel
-# - Deposit/Wallet restore: BTC/LTC addresses generated from XPUB if missing (bip_utils best-effort)
-# - Shop: live balance verify via helper (http://twxnhelp:8000/check_balance) before completing sale
-# - Home menu: 1 button first row, then 2 per row (randomized), matches your requested layout
+# Fully restored + fixes:
+# - Admin panel (Add Cards, Add to Balance, View Users, Remove Stock, Broadcast)
+# - Deposit/Wallet address generation (BTC/LTC from XPUB using bip-utils)
+# - Shop UI matching screenshot (label + Purchase button per row)
+# - Price at 40% + broadcast to stock channel when adding
+# - Balance verification via helper service before sending
+# - Support tickets + Referrals
 
 import os
 import math
 import random
 import asyncio
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List, Tuple
 
@@ -16,15 +19,15 @@ import aiohttp
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from cryptography.fernet import Fernet
 
-# ====== ENV ======
+# ========= ENV =========
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///data/market.db")
 FERNET_KEY = os.getenv("FERNET_KEY", "")
@@ -33,7 +36,6 @@ SUPPORT_HANDLE = os.getenv("SUPPORT_HANDLE", "@letwxn")
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "8418864166").split(",") if x.strip()}
 HELPER_URL = os.getenv("HELPER_URL", "http://twxnhelp:8000")
 
-# XPUBs for address generation (restore wallet gen behavior)
 BTC_XPUB = os.getenv("BTC_XPUB", "").strip()
 LTC_XPUB = os.getenv("LTC_XPUB", "").strip()
 
@@ -44,19 +46,18 @@ if not FERNET_KEY:
 
 fernet = Fernet(FERNET_KEY.encode() if isinstance(FERNET_KEY, str) else FERNET_KEY)
 
-# ====== DB & MODELS ======
+# ========= DB / MODELS =========
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, future=True)
 
-# Your models must exist in models.py with these names
 from models import Base, User, Wallet, Card, Order, Referral, ReferralBonus, SupportTicket
 Base.metadata.create_all(bind=engine)
 
-# ====== AIROGRAM ======
+# ========= AIROGRAM =========
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# ====== HELPERS ======
+# ========= HELPERS =========
 def is_admin(uid: int) -> bool:
     return uid in ADMIN_IDS
 
@@ -69,6 +70,14 @@ def dec_text(s: str) -> str:
 def money(v) -> str:
     return f"${Decimal(v):.2f}"
 
+def paginate(items: List, page: int, per: int = 10):
+    total = len(items)
+    pages = max(1, math.ceil(total / per))
+    page = max(1, min(page, pages))
+    start = (page - 1) * per
+    end = start + per
+    return items[start:end], page, pages
+
 def get_or_create_wallet(db, user_id: int, coin: str) -> Wallet:
     w = db.query(Wallet).filter(Wallet.user_id == user_id, Wallet.coin == coin).first()
     if w:
@@ -77,6 +86,72 @@ def get_or_create_wallet(db, user_id: int, coin: str) -> Wallet:
     db.add(w); db.commit(); db.refresh(w)
     return w
 
+def compute_rate_for_card(card: Card) -> Decimal:
+    # listing price at 40% of balance
+    return Decimal("0.40")
+
+def now_utc_hhmmss() -> str:
+    return datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+
+# ========= XPUB ADDRESS GEN (BIP84 bech32) =========
+def _derive_address_from_xpub(xpub: str, index: int, coin_type: str) -> Optional[str]:
+    if not xpub:
+        return None
+    try:
+        from bip_utils import Bip84, Bip84Coins
+        coin = Bip84Coins.BITCOIN if coin_type == "BTC" else Bip84Coins.LITECOIN
+        acct = Bip84.FromXPub(xpub, coin)
+        return acct.Change(Bip84.Change.EXTERNAL).AddressIndex(index).PublicKey().ToAddress()
+    except Exception:
+        return None
+
+def _next_index_for_user(db, user_id: int, coin: str) -> int:
+    w = db.query(Wallet).filter(Wallet.user_id == user_id, Wallet.coin == coin).first()
+    if not w:
+        w = Wallet(user_id=user_id, coin=coin, balance=Decimal("0"), address_index=0)
+        db.add(w); db.commit(); db.refresh(w)
+    if w.address_index is None:
+        w.address_index = 0
+    return int(w.address_index)
+
+def ensure_deposit_address(db, user_id: int, coin: str) -> Optional[str]:
+    w = db.query(Wallet).filter(Wallet.user_id == user_id, Wallet.coin == coin).first()
+    if not w:
+        w = Wallet(user_id=user_id, coin=coin, balance=Decimal("0"))
+        db.add(w); db.commit(); db.refresh(w)
+
+    if w.deposit_address:
+        return w.deposit_address
+
+    xpub = BTC_XPUB if coin == "BTC" else LTC_XPUB if coin == "LTC" else ""
+    if not xpub:
+        return None
+
+    idx = _next_index_for_user(db, user_id, coin)
+    addr = _derive_address_from_xpub(xpub, idx, coin)
+    if addr:
+        w.deposit_address = addr
+        w.address_index = idx + 1
+        db.commit(); db.refresh(w)
+        return addr
+    return None
+
+# ========= HELPER SERVICE =========
+async def helper_check_balance(number: str, exp: str, code: str) -> dict:
+    url = f"{HELPER_URL.rstrip('/')}/check_balance"
+    payload = {"number": number, "exp": exp, "code": code}
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(url, json=payload, timeout=45) as r:
+                if r.status != 200:
+                    return {"status": "error", "balance": 0.0, "raw": f"http {r.status}"}
+                return await r.json()
+        except asyncio.TimeoutError:
+            return {"status": "timeout", "balance": 0.0}
+        except Exception as e:
+            return {"status": "error", "balance": 0.0, "raw": str(e)}
+
+# ========= HOME =========
 def home_message_text(usd_balance: Decimal, purchased: int, stock_count: int) -> str:
     return (
         "💳 *Welcome to Twxn’s Prepaid Market!*\n\n"
@@ -91,121 +166,32 @@ def home_message_text(usd_balance: Decimal, purchased: int, stock_count: int) ->
     )
 
 def home_menu_kb(is_admin_user: bool) -> InlineKeyboardMarkup:
-    # main rows randomized: 1 button first row, 2 thereafter
-    buttons = [
+    pool = [
         InlineKeyboardButton(text="🧾 View Listings", callback_data="shop:page:1"),
         InlineKeyboardButton(text="💵 Deposit", callback_data="home:wallet"),
-        InlineKeyboardButton(text="🛒 My Purchases", callback_data="home:orders"),
-        InlineKeyboardButton(text="🎁 Referral", callback_data="home:referral"),
-        InlineKeyboardButton(text="🆘 Support", callback_data="home:support"),
+        InlineKeyboardButton(text="🛒 Purchase History", callback_data="home:orders"),
+        InlineKeyboardButton(text="🎁 Referrals", callback_data="home:referral"),
+        InlineKeyboardButton(text="🆘 Support Ticket", callback_data="home:support"),
     ]
-    random.shuffle(buttons)
+    random.shuffle(pool)
     rows = []
-    if buttons:
-        rows.append([buttons[0]])              # 1 button row
-        for i in range(1, len(buttons), 2):    # 2 per row afterward
-            rows.append(buttons[i:i+2])
+    if pool:
+        rows.append([pool[0]])  # first row single
+        for i in range(1, len(pool), 2):
+            rows.append(pool[i:i+2])
     if is_admin_user:
-        rows.append([InlineKeyboardButton(text="🛠 Admin Panel", callback_data="admin:menu")])
+        rows.append([InlineKeyboardButton(text="⚙️ Admin Panel", callback_data="admin:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def paginate(items: List[Card], page: int, per: int = 10) -> Tuple[List[Card], int, int]:
-    total = len(items)
-    pages = max(1, math.ceil(total / per))
-    page = max(1, min(page, pages))
-    start = (page - 1) * per
-    end = start + per
-    return items[start:end], page, pages
-
-# ====== XPUB DERIVATION (best-effort) ======
-def _derive_address_from_xpub(xpub: str, index: int, coin_type: str) -> Optional[str]:
-    """
-    Try to derive bech32 addresses with bip_utils; if unavailable, return None
-    coin_type in {"BTC","LTC"} used only as a hint.
-    """
-    if not xpub:
-        return None
-    try:
-        from bip_utils import Bip84, Bip84Coins
-        coins = Bip84Coins.BITCOIN if coin_type == "BTC" else Bip84Coins.LITECOIN
-        acct = Bip84.FromXPub(xpub, coins)
-        return acct.Change(Bip84.Change.EXTERNAL).AddressIndex(index).PublicKey().ToAddress()
-    except Exception:
-        return None
-
-def _next_address_index(db, user_id: int, coin: str) -> int:
-    w = db.query(Wallet).filter(Wallet.user_id == user_id, Wallet.coin == coin).first()
-    if not w:
-        w = Wallet(user_id=user_id, coin=coin, balance=Decimal("0"), address_index=0)
-        db.add(w); db.commit(); db.refresh(w)
-    if w.address_index is None:
-        w.address_index = 0
-    return int(w.address_index)
-
-def ensure_deposit_address(db, user_id: int, coin: str) -> Optional[str]:
-    """
-    Restore original behavior: if no address exists, derive one from XPUB and save it.
-    Reuse existing address if already present.
-    """
-    w = db.query(Wallet).filter(Wallet.user_id == user_id, Wallet.coin == coin).first()
-    if not w:
-        w = Wallet(user_id=user_id, coin=coin, balance=Decimal("0"))
-        db.add(w); db.commit(); db.refresh(w)
-
-    if w.deposit_address:
-        return w.deposit_address
-
-    # Derive only if XPUB is set
-    xpub = BTC_XPUB if coin == "BTC" else LTC_XPUB if coin == "LTC" else ""
-    if not xpub:
-        return None
-
-    idx = _next_address_index(db, user_id, coin)
-    addr = _derive_address_from_xpub(xpub, idx, coin)
-
-    if addr:
-        w.deposit_address = addr
-        w.address_index = idx + 1
-        db.commit(); db.refresh(w)
-        return addr
-
-    # Could not derive (lib missing or invalid xpub)
-    return None
-
-# ====== BALANCE HELPER HTTP ======
-async def helper_check_balance(number: str, exp: str, code: str) -> dict:
-    """
-    POST to twxnhelp /check_balance; returns {status, balance}
-    """
-    url = f"{HELPER_URL.rstrip('/')}/check_balance"
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(url, json={"number": number, "exp": exp, "code": code}, timeout=30) as r:
-                if r.status != 200:
-                    text = await r.text()
-                    return {"status": "error", "balance": 0.0, "raw": f"http {r.status}: {text}"}
-                return await r.json()
-        except asyncio.TimeoutError:
-            return {"status": "timeout", "balance": 0.0}
-        except Exception as e:
-            return {"status": "error", "balance": 0.0, "raw": str(e)}
-
-# ====== PRICING ======
-def compute_rate_for_card(card: Card) -> Decimal:
-    # Sell at 40% of face value (as requested)
-    return Decimal("0.40")
-
-# ====== /start with referral capture ======
 @dp.message(Command("start"))
-async def cmd_start(msg: types.Message):
+async def on_start(msg: types.Message):
     db = SessionLocal()
     try:
         u = db.get(User, msg.from_user.id)
         if not u:
             u = User(id=msg.from_user.id, username=msg.from_user.username, display_name=msg.from_user.full_name)
             db.add(u); db.commit()
-
-        # Capture referral: /start ref_<id>
+        # referrals: /start ref_<id>
         try:
             if msg.text and " " in msg.text:
                 _, param = msg.text.split(" ", 1)
@@ -219,7 +205,6 @@ async def cmd_start(msg: types.Message):
         except Exception:
             pass
 
-        # Ensure wallets exist
         w_usd = get_or_create_wallet(db, msg.from_user.id, "USD")
         purchased = db.query(Order).filter(Order.user_id == msg.from_user.id).count()
         stock = db.query(Card).filter(Card.status == "in_stock").count()
@@ -232,7 +217,7 @@ async def cmd_start(msg: types.Message):
         db.close()
 
 @dp.callback_query(F.data == "home:back")
-async def on_home_back(cq: types.CallbackQuery):
+async def home_back(cq: types.CallbackQuery):
     db = SessionLocal()
     try:
         w_usd = get_or_create_wallet(db, cq.from_user.id, "USD")
@@ -246,7 +231,7 @@ async def on_home_back(cq: types.CallbackQuery):
     finally:
         db.close()
 
-# ====== WALLET / DEPOSIT (original style with coin choice) ======
+# ========= WALLET / DEPOSIT =========
 @dp.callback_query(F.data == "home:wallet")
 async def wallet_inline(cq: types.CallbackQuery):
     await cq.answer()
@@ -260,11 +245,12 @@ async def wallet_inline(cq: types.CallbackQuery):
         ltc = Decimal(w_ltc.balance or 0)
     finally:
         db.close()
+
     txt = (
         "🏦 *Make a Deposit*\n\n"
         f"USD: {money(usd)}\n"
-        f"BTC: {btc:.8f}\n"
-        f"LTC: {ltc:.8f}\n\n"
+        f"BTC: {btc:.8f} (~{money(Decimal('0'))})\n"
+        f"LTC: {ltc:.8f} (~{money(Decimal('0'))})\n\n"
         "Choose a coin below. Your USD wallet is credited after *2 confirmations*."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -275,44 +261,46 @@ async def wallet_inline(cq: types.CallbackQuery):
     await cq.message.edit_text(txt, parse_mode="Markdown", reply_markup=kb)
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("deposit:"))
-async def on_deposit_coin(cq: types.CallbackQuery):
+async def deposit_addr(cq: types.CallbackQuery):
     await cq.answer()
-    coin = cq.data.split(":")[1]  # BTC | LTC
+    coin = cq.data.split(":")[1]
     db = SessionLocal()
     try:
         addr = ensure_deposit_address(db, cq.from_user.id, coin)
-        if not addr:
-            await cq.message.answer(
-                f"⚠️ Could not generate {coin} address (missing XPUB or derivation lib).",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="home:wallet")]])
-            )
-            return
     finally:
         db.close()
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="home:wallet")]
-    ])
+    if not addr:
+        await cq.message.answer(
+            f"⚠️ Could not generate a {coin} address (missing/invalid XPUB or derivation library).",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="home:wallet")]])
+        )
+        return
     await cq.message.answer(
         f"📥 Send *{coin}* to:\n`{addr}`\n\nWe credit your *USD* wallet after 2 confirmations.",
         parse_mode="Markdown",
-        reply_markup=kb
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="home:wallet")]])
     )
 
-# ====== SHOP ======
-def shop_kb_page(cards: List[Card], page: int, pages: int) -> InlineKeyboardMarkup:
-    rows = []
-    for c in cards:
-        label = f"{c.site or '—'} • {c.bin} • {money(c.balance)} • id {c.id}"
-        rows.append([InlineKeyboardButton(text=label, callback_data=f"shop:buy:{c.id}")])
-    nav = []
-    if page > 1:
-        nav.append(InlineKeyboardButton(text="⬅ Prev", callback_data=f"shop:page:{page-1}"))
-    if page < pages:
-        nav.append(InlineKeyboardButton(text="Next ➡", callback_data=f"shop:page:{page+1}"))
-    if nav:
-        rows.append(nav)
-    rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="home:back")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+# ========= SHOP =========
+def listings_header(db, uid: int) -> str:
+    w_usd = get_or_create_wallet(db, uid, "USD")
+    w_btc = get_or_create_wallet(db, uid, "BTC")
+    w_ltc = get_or_create_wallet(db, uid, "LTC")
+    header = (
+        "💎 *Twxn's Main Listings* 💎\n\n"
+        "Your Balance:\n"
+        f"🪙 USD: *{money(Decimal(w_usd.balance or 0))}*\n"
+        f"• BTC: {Decimal(w_btc.balance or 0):.8f} ({money(0)})\n"
+        f"• LTC: {Decimal(w_ltc.balance or 0):.8f} ({money(0)})\n\n"
+    )
+    return header
+
+def shop_row_kb(card: Card) -> List[List[InlineKeyboardButton]]:
+    label = f"{card.bin} ${Decimal(card.balance):.2f}"
+    return [[
+        InlineKeyboardButton(text=f"{label[:12]}…${Decimal(card.balance):.2f}" if len(label) > 12 else label, callback_data="noop"),
+        InlineKeyboardButton(text="🛒 Purchase", callback_data=f"shop:buy:{card.id}")
+    ]]
 
 @dp.callback_query(F.data.startswith("shop:page:"))
 async def shop_page(cq: types.CallbackQuery):
@@ -320,10 +308,30 @@ async def shop_page(cq: types.CallbackQuery):
     page = int(page_s)
     db = SessionLocal()
     try:
-        all_cards = db.query(Card).filter(Card.status == "in_stock").order_by(Card.id.desc()).all()
-        subset, page, pages = paginate(all_cards, page, 10)
-        await cq.message.edit_text("🧾 *Available Cards*", parse_mode="Markdown",
-                                   reply_markup=shop_kb_page(subset, page, pages))
+        cards = db.query(Card).filter(Card.status == "in_stock").order_by(Card.id.asc()).all()
+        subset, page, pages = paginate(cards, page, 20)
+        text = listings_header(db, cq.from_user.id)
+
+        # top list as text like screenshot
+        lines = []
+        for i, c in enumerate(subset, 1):
+            lines.append(f"{i}. {c.bin} USD{Decimal(c.balance):.2f} at 40% |")
+        text += "\n".join(lines) + f"\n\nPage {page}/{pages} | Updated: {now_utc_hhmmss()}"
+
+        rows = []
+        for c in subset:
+            rows.extend(shop_row_kb(c))
+
+        nav = []
+        if page > 1:
+            nav.append(InlineKeyboardButton(text="⬅ Prev", callback_data=f"shop:page:{page-1}"))
+        if page < pages:
+            nav.append(InlineKeyboardButton(text="Next ➡", callback_data=f"shop:page:{page+1}"))
+        if nav:
+            rows.append(nav)
+        rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="home:back")])
+
+        await cq.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
     finally:
         db.close()
 
@@ -338,14 +346,13 @@ async def shop_buy_request(cq: types.CallbackQuery):
             await cq.message.answer("🚫 Card not available.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="shop:page:1")]]))
             return
         rate = compute_rate_for_card(card)
-        # Prefer explicit card.price if you ever set it; otherwise 40% rule
         sale_price = (Decimal(card.price or 0) or (Decimal(card.balance or 0) * rate)).quantize(Decimal("0.01"))
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=f"✅ Confirm {money(sale_price)}", callback_data=f"shop:confirm:{cid}:{sale_price}")],
             [InlineKeyboardButton(text="❌ Cancel", callback_data="shop:page:1")]
         ])
         await cq.message.answer(
-            f"⚠️ Confirm purchase of card id:{cid} for *{money(sale_price)}* ?",
+            f"⚠️ Confirm purchase of *{card.bin}* id:{cid} for *{money(sale_price)}* ?",
             parse_mode="Markdown",
             reply_markup=kb
         )
@@ -355,9 +362,7 @@ async def shop_buy_request(cq: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("shop:confirm:"))
 async def shop_buy_confirm(cq: types.CallbackQuery):
     _, _, cid_s, price_s = cq.data.split(":")
-    cid = int(cid_s)
-    sale_price = Decimal(price_s)
-
+    cid = int(cid_s); sale_price = Decimal(price_s)
     db = SessionLocal()
     try:
         card = db.get(Card, cid)
@@ -365,50 +370,47 @@ async def shop_buy_confirm(cq: types.CallbackQuery):
             await cq.message.answer("🚫 Card not available.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="shop:page:1")]]))
             return
 
-        # Check buyer USD balance
         w_usd = get_or_create_wallet(db, cq.from_user.id, "USD")
         if Decimal(w_usd.balance or 0) < sale_price:
             await cq.message.answer(f"❌ Not enough USD balance. Need {money(sale_price)}.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="shop:page:1")]]))
             return
 
-        # Live verification via helper
+        # Live check
         number = card.cc_number or ""
         exp = (card.exp or "").replace(" ", "")
-        # If your PIN/CODE is the gift code, it's stored encrypted
-        code = ""
         try:
             code = dec_text(card.encrypted_code)
         except Exception:
-            pass
-
+            code = ""
         chk = await helper_check_balance(number, exp, code)
         status = chk.get("status")
-        new_balance = Decimal(str(chk.get("balance", "0")))
-        if status in ("invalid", "timeout", "error", "unknown") or new_balance <= 0:
+        new_bal = Decimal(str(chk.get("balance", "0")))
+
+        if status not in ("ok",) or new_bal <= 0:
             await cq.message.answer("❌ Card failed verification. Purchase canceled.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="shop:page:1")]]))
             return
 
-        # If balance changed, update listing and ask to reconfirm
-        if new_balance != Decimal(card.balance or 0):
-            card.balance = new_balance
+        # If balance changed — update & ask to reconfirm
+        if new_bal != Decimal(card.balance or 0):
+            card.balance = new_bal
             db.commit()
-            await cq.message.answer(f"ℹ️ Card balance updated to {money(new_balance)}. Please re-open listings to reconfirm.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🧾 View Listings", callback_data="shop:page:1")]]))
+            await cq.message.answer(
+                f"ℹ️ Balance changed to {money(new_bal)}. Listing updated. Please purchase again.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🧾 View Listings", callback_data="shop:page:1")]])
+            )
             return
 
-        # Deduct & finalize sale
+        # Proceed: deduct and deliver
         w_usd.balance = Decimal(w_usd.balance or 0) - sale_price
         card.status = "sold"
         order = Order(user_id=cq.from_user.id, card_id=card.id, price_usd=sale_price, coin_used="USD", coin_amount=sale_price, status="completed")
-        db.add(order)
-        db.commit(); db.refresh(order)
+        db.add(order); db.commit(); db.refresh(order)
 
-        # Reveal the code to buyer
-        code_val = ""
+        revealed = ""
         try:
-            code_val = dec_text(card.encrypted_code)
+            revealed = dec_text(card.encrypted_code)
         except Exception:
-            code_val = "(encrypted)"
-
+            revealed = "(encrypted)"
         msg = (
             f"✅ Purchase complete!\n\n"
             f"Card id: {card.id}\n"
@@ -416,24 +418,75 @@ async def shop_buy_confirm(cq: types.CallbackQuery):
             f"BIN: {card.bin}\n"
             f"CC: {card.cc_number}\n"
             f"EXP: {card.exp}\n"
-            f"CODE: `{code_val}`\n\n"
+            f"CODE: `{revealed}`\n\n"
             f"Paid: {money(sale_price)}\nOrder ID: {order.id}"
         )
         await cq.message.answer(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back to Home", callback_data="home:back")]]))
-
     finally:
         db.close()
 
-# ====== ADMIN PANEL (same options restored) ======
+# ========= SUPPORT =========
+class SupportSG(StatesGroup):
+    waiting_subject = State()
+
+@dp.callback_query(F.data == "home:support")
+async def support_start(cq: types.CallbackQuery, state: FSMContext):
+    await cq.answer()
+    await state.set_state(SupportSG.waiting_subject)
+    await cq.message.answer("🆘 Send a brief subject for your support ticket:")
+
+@dp.message(SupportSG.waiting_subject)
+async def support_subject(msg: types.Message, state: FSMContext):
+    db = SessionLocal()
+    try:
+        t = SupportTicket(user_id=msg.from_user.id, subject=msg.text.strip(), status="open")
+        db.add(t); db.commit(); db.refresh(t)
+        # notify admins (first admin id)
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, f"🎫 New Support Ticket #{t.id} from @{msg.from_user.username or msg.from_user.id}\n\n{t.subject}")
+            except Exception:
+                pass
+        await msg.answer(f"✅ Ticket #{t.id} created. We’ll reply soon.")
+    finally:
+        db.close()
+    await state.clear()
+
+# ========= REFERRALS =========
+@dp.callback_query(F.data == "home:referral")
+async def referral_info(cq: types.CallbackQuery):
+    invite = f"https://t.me/{(await bot.get_me()).username}?start=ref_{cq.from_user.id}"
+    db = SessionLocal()
+    try:
+        cnt = db.query(Referral).filter(Referral.referrer_id == cq.from_user.id).count()
+    finally:
+        db.close()
+    await cq.message.answer(
+        f"🎁 *Referral Program*\n\nShare this link:\n{invite}\n\nReferrals so far: *{cnt}*",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="home:back")]])
+    )
+
+# ========= ADMIN =========
 class AddCardSG(StatesGroup):
     waiting_line = State()
+
+class AddBalanceSG(StatesGroup):
+    waiting_user = State()
+    waiting_amount = State()
+
+class RemoveStockSG(StatesGroup):
+    waiting_id = State()
 
 def admin_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Add Cards", callback_data="admin:add")],
+        [InlineKeyboardButton(text="💳 Add to User Balance", callback_data="admin:add_balance")],
+        [InlineKeyboardButton(text="👥 View All Users", callback_data="admin:view_users:1")],
+        [InlineKeyboardButton(text="🗑 Remove Stock", callback_data="admin:remove_stock")],
         [InlineKeyboardButton(text="📢 Broadcast Stock Count", callback_data="admin:broadcast")],
-        [InlineKeyboardButton(text="🗂 View Sales (coming soon)", callback_data="admin:view_sales")],
-        [InlineKeyboardButton(text="🎫 Support Tickets (coming soon)", callback_data="admin:support")],
+        [InlineKeyboardButton(text="🗂 View Sales (soon)", callback_data="admin:view_sales")],
+        [InlineKeyboardButton(text="🎫 Support Tickets (soon)", callback_data="admin:support")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="home:back")]
     ])
 
@@ -443,14 +496,16 @@ async def admin_menu(cq: types.CallbackQuery):
         return await cq.answer("Not allowed.", show_alert=True)
     await cq.message.edit_text("👑 Admin Panel", reply_markup=admin_menu_kb())
 
+# Add cards
 @dp.callback_query(F.data == "admin:add")
 async def admin_add_cards_start(cq: types.CallbackQuery, state: FSMContext):
     if not is_admin(cq.from_user.id):
         return await cq.answer("Not allowed.", show_alert=True)
     await state.set_state(AddCardSG.waiting_line)
-    fmt = ("Send one line per card in this format:\n"
-           "`SITE|BIN|CC_NUMBER|EXP|PIN/CODE|BALANCE`")
-    await cq.message.edit_text("➕ *Add Cards*\n\n" + fmt, parse_mode="Markdown")
+    await cq.message.edit_text(
+        "➕ *Add Cards*\n\nSend one line per card:\n`SITE|BIN|CC_NUMBER|EXP|PIN/CODE|BALANCE`",
+        parse_mode="Markdown"
+    )
 
 @dp.message(AddCardSG.waiting_line)
 async def admin_add_cards_receive(msg: types.Message, state: FSMContext):
@@ -474,10 +529,10 @@ async def admin_add_cards_receive(msg: types.Message, state: FSMContext):
             )
             db.add(c); db.commit(); db.refresh(c)
 
-            # Broadcast to stock channel
+            # broadcast
             try:
-                if STOCK_CHANNEL_ID != 0:
-                    await bot.send_message(STOCK_CHANNEL_ID, f"🆕 New card: {site} {bin6} • {money(bal)} • id {c.id}")
+                if STOCK_CHANNEL_ID:
+                    await bot.send_message(STOCK_CHANNEL_ID, f"🆕 New card: {site} {bin6} • {money(bal)} • id {c.id} (40%)")
             except Exception:
                 pass
 
@@ -486,8 +541,107 @@ async def admin_add_cards_receive(msg: types.Message, state: FSMContext):
             db.close()
         await state.clear()
     except Exception as e:
-        await msg.answer(f"❌ Failed to add: {e}\nFormat: `SITE|BIN|CC|EXP|PIN/CODE|BALANCE`", parse_mode="Markdown")
+        await msg.answer(f"❌ Failed: {e}\nFormat: `SITE|BIN|CC|EXP|PIN/CODE|BALANCE`", parse_mode="Markdown")
 
+# Add to user balance
+@dp.callback_query(F.data == "admin:add_balance")
+async def admin_add_balance_start(cq: types.CallbackQuery, state: FSMContext):
+    if not is_admin(cq.from_user.id):
+        return await cq.answer("Not allowed.", show_alert=True)
+    await state.set_state(AddBalanceSG.waiting_user)
+    await cq.message.edit_text("💳 Send the *User ID* to credit:", parse_mode="Markdown")
+
+@dp.message(AddBalanceSG.waiting_user)
+async def admin_add_balance_user(msg: types.Message, state: FSMContext):
+    try:
+        uid = int(msg.text.strip())
+        await state.update_data(uid=uid)
+        await state.set_state(AddBalanceSG.waiting_amount)
+        await msg.answer("Amount in USD (e.g. 25.00):")
+    except Exception:
+        await msg.answer("Send a numeric User ID.")
+
+@dp.message(AddBalanceSG.waiting_amount)
+async def admin_add_balance_amount(msg: types.Message, state: FSMContext):
+    data = await state.get_data()
+    uid = int(data.get("uid"))
+    try:
+        amt = Decimal(msg.text.strip()).quantize(Decimal("0.01"))
+        db = SessionLocal()
+        try:
+            w = get_or_create_wallet(db, uid, "USD")
+            w.balance = Decimal(w.balance or 0) + amt
+            db.commit()
+        finally:
+            db.close()
+        await msg.answer(f"✅ Credited {money(amt)} to user {uid}.")
+        await state.clear()
+    except Exception as e:
+        await msg.answer(f"Error: {e}")
+
+# View users
+def users_page_kb(users, page, pages):
+    rows = []
+    for u in users:
+        rows.append([InlineKeyboardButton(text=f"{u.id} @{u.username or ''}", callback_data="noop")])
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton(text="⬅ Prev", callback_data=f"admin:view_users:{page-1}"))
+    if page < pages:
+        nav.append(InlineKeyboardButton(text="Next ➡", callback_data=f"admin:view_users:{page+1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="admin:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+@dp.callback_query(F.data.startswith("admin:view_users:"))
+async def admin_view_users(cq: types.CallbackQuery):
+    if not is_admin(cq.from_user.id):
+        return await cq.answer("Not allowed.", show_alert=True)
+    _, _, page_s = cq.data.split(":")
+    page = int(page_s)
+    db = SessionLocal()
+    try:
+        users = db.query(User).order_by(User.id.asc()).all()
+        subset, page, pages = paginate(users, page, 15)
+
+        lines = []
+        for u in subset:
+            w = get_or_create_wallet(db, u.id, "USD")
+            lines.append(f"{u.id} @{u.username or ''} — USD {money(Decimal(w.balance or 0))}")
+        text = "👥 *All Users*\n\n" + "\n".join(lines) + f"\n\nPage {page}/{pages}"
+        await cq.message.edit_text(text, parse_mode="Markdown", reply_markup=users_page_kb(subset, page, pages))
+    finally:
+        db.close()
+
+# Remove stock
+@dp.callback_query(F.data == "admin:remove_stock")
+async def admin_remove_stock_start(cq: types.CallbackQuery, state: FSMContext):
+    if not is_admin(cq.from_user.id):
+        return await cq.answer("Not allowed.", show_alert=True)
+    await state.set_state(RemoveStockSG.waiting_id)
+    await cq.message.edit_text("🗑 Send the Card ID to remove from stock:")
+
+@dp.message(RemoveStockSG.waiting_id)
+async def admin_remove_stock_do(msg: types.Message, state: FSMContext):
+    try:
+        cid = int(msg.text.strip())
+        db = SessionLocal()
+        try:
+            card = db.get(Card, cid)
+            if not card:
+                await msg.answer("No such card id.")
+            else:
+                card.status = "sold"
+                db.commit()
+                await msg.answer(f"✅ Card {cid} removed from stock.")
+        finally:
+            db.close()
+        await state.clear()
+    except Exception:
+        await msg.answer("Send a numeric Card ID.")
+
+# Broadcast
 @dp.callback_query(F.data == "admin:broadcast")
 async def admin_broadcast_stock(cq: types.CallbackQuery):
     if not is_admin(cq.from_user.id):
@@ -497,7 +651,7 @@ async def admin_broadcast_stock(cq: types.CallbackQuery):
         cnt = db.query(Card).filter(Card.status == "in_stock").count()
     finally:
         db.close()
-    if STOCK_CHANNEL_ID == 0:
+    if not STOCK_CHANNEL_ID:
         return await cq.answer("STOCK_CHANNEL_ID not set.", show_alert=True)
     await bot.send_message(STOCK_CHANNEL_ID, f"📦 Stock live: {cnt} card(s).")
     await cq.answer("Sent.")
@@ -514,7 +668,12 @@ async def admin_support(cq: types.CallbackQuery):
         return await cq.answer("Not allowed.", show_alert=True)
     await cq.answer("Coming soon.")
 
-# ====== RUN ======
+# ======== NOOP catcher (for left labels) ========
+@dp.callback_query(F.data == "noop")
+async def noop_cb(cq: types.CallbackQuery):
+    await cq.answer()
+
+# ========= RUN =========
 async def main():
     me = await bot.get_me()
     print(f"🤖 Running as: @{me.username}")

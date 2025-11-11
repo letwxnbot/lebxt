@@ -5,7 +5,7 @@ SQLAlchemy==2.0.35
 psycopg2-binary==2.9.11
 cryptography==42.0.8
 python-dotenv==1.0.1
-bip-utils==2.10.0
+bitcoinlib==0.6.15
 Flask==3.0.3
 telethon==1.42.0
 gunicorn==21.2.0
