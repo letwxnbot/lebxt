@@ -1,17 +1,27 @@
+# Core Telegram + Async
 aiogram==3.5.0
-aiohttp==3.9.5
-pydantic==2.7.1
-SQLAlchemy==2.0.35
-psycopg2-binary==2.9.11
-cryptography==42.0.8
-python-dotenv==1.0.1
-bitcoinlib==0.6.15
-Flask==3.0.3
-telethon==1.42.0
-git+https://github.com/ricmoo/pyaes.git@v1.6.1
-gunicorn==21.2.0
-requests==2.32.3
+aiohttp==3.11.16
+
+# Crypto + Wallet generation
 bip-utils==2.10.0
 coincurve==21.0.0
 crcmod-plus==2.3.1
 
+# Database + ORM
+SQLAlchemy==2.0.30
+psycopg2-binary==2.9.11
+
+# Encryption + Utils
+cryptography==43.0.1
+python-dotenv==1.0.1
+pydantic==2.7.1
+pydantic-core==2.41.1
+
+# Telegram client for external balance checker bot
+Telethon==1.42.0
+
+# Flask for helper service
+Flask==3.0.3
+
+# Misc
+requests==2.32.3
